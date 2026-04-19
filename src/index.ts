@@ -5,7 +5,7 @@
 import { RpcTarget as RpcTargetImpl, RpcStub as RpcStubImpl, RpcPromise as RpcPromiseImpl } from "./core.js";
 import { serialize, deserialize } from "./serialize.js";
 import { RpcTransport, RpcSession as RpcSessionImpl, RpcSessionOptions } from "./rpc.js";
-import { RpcTargetBranded, RpcCompatible, Stub, Stubify, __RPC_TARGET_BRAND } from "./types.js";
+import { BaseType, RpcTargetBranded, RpcCompatible, Stub, Stubify, __RPC_TARGET_BRAND } from "./types.js";
 import { newWebSocketRpcSession as newWebSocketRpcSessionImpl,
          newWorkersWebSocketRpcResponse } from "./websocket.js";
 import { newHttpBatchRpcSession as newHttpBatchRpcSessionImpl,
@@ -20,7 +20,7 @@ forceInitStreams();
 // Re-export public API types.
 export { serialize, deserialize, newWorkersWebSocketRpcResponse, newHttpBatchRpcResponse,
          nodeHttpBatchRpcResponse };
-export type { RpcTransport, RpcSessionOptions, RpcCompatible };
+export type { RpcTransport, RpcSessionOptions, RpcCompatible, BaseType };
 
 // Hack the type system to make RpcStub's types work nicely!
 /**
@@ -33,7 +33,15 @@ export type { RpcTransport, RpcSessionOptions, RpcCompatible };
  * such method exists on the remote object, an exception is thrown back. But the client does not
  * actually know, until that point, what methods exist.
  */
-export type RpcStub<T extends RpcCompatible<T>> = Stub<T>;
+export type RpcStub<
+  T extends RpcCompatible<T, SupportedTypes>,
+  SupportedTypes = BaseType,
+> = Stub<T, SupportedTypes>;
+// The runtime constructor intentionally keeps the original single-generic signature: adding a
+// defaulted `SupportedTypes` parameter here would break `new RpcStub(value)` inference (TS
+// resolves `SupportedTypes` to `unknown` at the call site while the type alias uses `BaseType`,
+// producing mismatched `Provider` shapes). Custom-typed stubs should be obtained through the
+// type alias (e.g. on a session that produces them).
 export const RpcStub: {
   new <T extends RpcCompatible<T>>(value: T): RpcStub<T>;
 } = <any>RpcStubImpl;
@@ -56,7 +64,10 @@ export const RpcStub: {
  * if you only intend to use the promise for pipelining and you never await it, then there's no
  * need to transmit the resolution!
  */
-export type RpcPromise<T extends RpcCompatible<T>> = Stub<T> & Promise<Stubify<T>>;
+export type RpcPromise<
+  T extends RpcCompatible<T, SupportedTypes>,
+  SupportedTypes = BaseType,
+> = Stub<T, SupportedTypes> & Promise<Stubify<T, SupportedTypes>>;
 export const RpcPromise: {
   // Note: Cannot construct directly!
 } = <any>RpcPromiseImpl;
@@ -66,8 +77,11 @@ export const RpcPromise: {
  *
  * Most people won't use this. You only need it if you've implemented your own `RpcTransport`.
  */
-export interface RpcSession<T extends RpcCompatible<T> = undefined> {
-  getRemoteMain(): RpcStub<T>;
+export interface RpcSession<
+  T extends RpcCompatible<T, SupportedTypes> = undefined,
+  SupportedTypes = BaseType,
+> {
+  getRemoteMain(): RpcStub<T, SupportedTypes>;
   getStats(): {imports: number, exports: number};
 
   // Waits until the peer is not waiting on any more promise resolutions from us. This is useful
@@ -75,8 +89,11 @@ export interface RpcSession<T extends RpcCompatible<T> = undefined> {
   drain(): Promise<void>;
 }
 export const RpcSession: {
-  new <T extends RpcCompatible<T> = undefined>(
-      transport: RpcTransport, localMain?: any, options?: RpcSessionOptions): RpcSession<T>;
+  new <
+    T extends RpcCompatible<T, SupportedTypes> = undefined,
+    SupportedTypes = BaseType,
+  >(
+      transport: RpcTransport, localMain?: any, options?: RpcSessionOptions): RpcSession<T, SupportedTypes>;
 } = <any>RpcSessionImpl;
 
 // RpcTarget needs some hackage too to brand it properly and account for the implementation

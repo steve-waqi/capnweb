@@ -23,42 +23,6 @@ export type Stubable = RpcTargetBranded | ((...args: never[]) => unknown);
 
 type IsUnknown<T> = unknown extends T ? ([T] extends [unknown] ? true : false) : false;
 
-// Types that can be passed over RPC
-// The reason for using a generic type here is to build a serializable subset of structured
-//   cloneable composite types. This allows types defined with the "interface" keyword to pass the
-//   serializable check as well. Otherwise, only types defined with the "type" keyword would pass.
-export type RpcCompatible<T> =
-  // Allow `unknown` as a leaf so records/interfaces with `unknown` fields remain compatible.
-  | (IsUnknown<T> extends true ? unknown : never)
-  // Structured cloneables
-  | BaseType
-  // Structured cloneable composites
-  | Map<
-      T extends Map<infer U, unknown> ? RpcCompatible<U> : never,
-      T extends Map<unknown, infer U> ? RpcCompatible<U> : never
-    >
-  | Set<T extends Set<infer U> ? RpcCompatible<U> : never>
-  | Array<T extends Array<infer U> ? RpcCompatible<U> : never>
-  | ReadonlyArray<T extends ReadonlyArray<infer U> ? RpcCompatible<U> : never>
-  | {
-      [K in keyof T as K extends string | number ? K : never]: RpcCompatible<T[K]>;
-    }
-  | Promise<T extends Promise<infer U> ? RpcCompatible<U> : never>
-  // Special types
-  | Stub<Stubable>
-  // Serialized as stubs, see `Stubify`
-  | Stubable;
-
-// Base type for all RPC stubs, including common memory management methods.
-// `T` is used as a marker type for unwrapping `Stub`s later.
-interface StubBase<T = unknown> extends Disposable {
-  [__RPC_STUB_BRAND]: T;
-  dup(): this;
-  onRpcBroken(callback: (error: any) => void): void;
-}
-export type Stub<T extends RpcCompatible<T>> =
-    T extends object ? Provider<T> & StubBase<T> : StubBase<T>;
-
 type TypedArray =
   | Uint8Array
   | Uint8ClampedArray
@@ -72,8 +36,11 @@ type TypedArray =
   | Float32Array
   | Float64Array;
 
-// This represents all the types that can be sent as-is over an RPC boundary
-type BaseType =
+// This represents all the types that can be sent as-is over an RPC boundary.
+// It is the default value for the `SupportedTypes` parameter threaded through the utilities
+// below; a transport that handles additional native types (e.g. `URL`) can pass a superset
+// like `BaseType | URL` to opt those values out of recursive stubification.
+export type BaseType =
   | void
   | undefined
   | null
@@ -92,44 +59,85 @@ type BaseType =
   | Request
   | Response
   | Headers;
+
+// Types that can be passed over RPC.
+// The reason for using a generic type here is to build a serializable subset of structured
+//   cloneable composite types. This allows types defined with the "interface" keyword to pass the
+//   serializable check as well. Otherwise, only types defined with the "type" keyword would pass.
+// `SupportedTypes` is the transport's leaf set (see `BaseType`); recursing with the same
+// parameter keeps a custom leaf opaque wherever it appears in a composite.
+export type RpcCompatible<T, SupportedTypes = BaseType> =
+  // Allow `unknown` as a leaf so records/interfaces with `unknown` fields remain compatible.
+  | (IsUnknown<T> extends true ? unknown : never)
+  // Structured cloneables
+  | SupportedTypes
+  // Structured cloneable composites
+  | Map<
+      T extends Map<infer U, unknown> ? RpcCompatible<U, SupportedTypes> : never,
+      T extends Map<unknown, infer U> ? RpcCompatible<U, SupportedTypes> : never
+    >
+  | Set<T extends Set<infer U> ? RpcCompatible<U, SupportedTypes> : never>
+  | Array<T extends Array<infer U> ? RpcCompatible<U, SupportedTypes> : never>
+  | ReadonlyArray<T extends ReadonlyArray<infer U> ? RpcCompatible<U, SupportedTypes> : never>
+  | {
+      [K in keyof T as K extends string | number ? K : never]: RpcCompatible<T[K], SupportedTypes>;
+    }
+  | Promise<T extends Promise<infer U> ? RpcCompatible<U, SupportedTypes> : never>
+  // Special types
+  | Stub<Stubable, SupportedTypes>
+  // Serialized as stubs, see `Stubify`
+  | Stubable;
+
+// Base type for all RPC stubs, including common memory management methods.
+// `T` is used as a marker type for unwrapping `Stub`s later.
+interface StubBase<T = unknown> extends Disposable {
+  [__RPC_STUB_BRAND]: T;
+  dup(): this;
+  onRpcBroken(callback: (error: any) => void): void;
+}
+export type Stub<
+  T extends RpcCompatible<T, SupportedTypes>,
+  SupportedTypes = BaseType,
+> = T extends object ? Provider<T, SupportedTypes> & StubBase<T> : StubBase<T>;
+
 // Recursively rewrite all `Stubable` types with `Stub`s, and resolve promises.
 // prettier-ignore
-export type Stubify<T> =
-  T extends Stubable ? Stub<T>
-  : T extends Promise<infer U> ? Stubify<U>
+export type Stubify<T, SupportedTypes = BaseType> =
+  T extends Stubable ? Stub<T, SupportedTypes>
+  : T extends Promise<infer U> ? Stubify<U, SupportedTypes>
   : T extends StubBase<any> ? T
-  : T extends Map<infer K, infer V> ? Map<Stubify<K>, Stubify<V>>
-  : T extends Set<infer V> ? Set<Stubify<V>>
+  : T extends Map<infer K, infer V> ? Map<Stubify<K, SupportedTypes>, Stubify<V, SupportedTypes>>
+  : T extends Set<infer V> ? Set<Stubify<V, SupportedTypes>>
   : T extends [] ? []
-  : T extends [infer Head, ...infer Tail] ? [Stubify<Head>, ...Stubify<Tail>]
+  : T extends [infer Head, ...infer Tail] ? [Stubify<Head, SupportedTypes>, ...Stubify<Tail, SupportedTypes>]
   : T extends readonly [] ? readonly []
-  : T extends readonly [infer Head, ...infer Tail] ? readonly [Stubify<Head>, ...Stubify<Tail>]
-  : T extends Array<infer V> ? Array<Stubify<V>>
-  : T extends ReadonlyArray<infer V> ? ReadonlyArray<Stubify<V>>
-  : T extends BaseType ? T
+  : T extends readonly [infer Head, ...infer Tail] ? readonly [Stubify<Head, SupportedTypes>, ...Stubify<Tail, SupportedTypes>]
+  : T extends Array<infer V> ? Array<Stubify<V, SupportedTypes>>
+  : T extends ReadonlyArray<infer V> ? ReadonlyArray<Stubify<V, SupportedTypes>>
+  : T extends SupportedTypes ? T
   // When using "unknown" instead of "any", interfaces are not stubified.
-  : T extends { [key: string | number]: any } ? { [K in keyof T as K extends string | number ? K : never]: Stubify<T[K]> }
+  : T extends { [key: string | number]: any } ? { [K in keyof T as K extends string | number ? K : never]: Stubify<T[K], SupportedTypes> }
   : T;
 
 // Recursively rewrite all `Stub<T>`s with the corresponding `T`s.
 // Note we use `StubBase` instead of `Stub` here to avoid circular dependencies:
 // `Stub` depends on `Provider`, which depends on `Unstubify`, which would depend on `Stub`.
 // prettier-ignore
-type UnstubifyInner<T> =
+type UnstubifyInner<T, SupportedTypes = BaseType> =
   // Preserve local RpcTarget acceptance, but avoid needless `Stub | Value` unions when the stub
   // is already assignable to the value type (important for callback contextual typing).
-  T extends StubBase<infer V> ? (T extends V ? UnstubifyInner<V> : (T | UnstubifyInner<V>))
-  : T extends Promise<infer U> ? UnstubifyInner<U>
-  : T extends Map<infer K, infer V> ? Map<Unstubify<K>, Unstubify<V>>
-  : T extends Set<infer V> ? Set<Unstubify<V>>
+  T extends StubBase<infer V> ? (T extends V ? UnstubifyInner<V, SupportedTypes> : (T | UnstubifyInner<V, SupportedTypes>))
+  : T extends Promise<infer U> ? UnstubifyInner<U, SupportedTypes>
+  : T extends Map<infer K, infer V> ? Map<Unstubify<K, SupportedTypes>, Unstubify<V, SupportedTypes>>
+  : T extends Set<infer V> ? Set<Unstubify<V, SupportedTypes>>
   : T extends [] ? []
-  : T extends [infer Head, ...infer Tail] ? [Unstubify<Head>, ...Unstubify<Tail>]
+  : T extends [infer Head, ...infer Tail] ? [Unstubify<Head, SupportedTypes>, ...Unstubify<Tail, SupportedTypes>]
   : T extends readonly [] ? readonly []
-  : T extends readonly [infer Head, ...infer Tail] ? readonly [Unstubify<Head>, ...Unstubify<Tail>]
-  : T extends Array<infer V> ? Array<Unstubify<V>>
-  : T extends ReadonlyArray<infer V> ? ReadonlyArray<Unstubify<V>>
-  : T extends BaseType ? T
-  : T extends { [key: string | number]: unknown } ? { [K in keyof T as K extends string | number ? K : never]: Unstubify<T[K]> }
+  : T extends readonly [infer Head, ...infer Tail] ? readonly [Unstubify<Head, SupportedTypes>, ...Unstubify<Tail, SupportedTypes>]
+  : T extends Array<infer V> ? Array<Unstubify<V, SupportedTypes>>
+  : T extends ReadonlyArray<infer V> ? ReadonlyArray<Unstubify<V, SupportedTypes>>
+  : T extends SupportedTypes ? T
+  : T extends { [key: string | number]: unknown } ? { [K in keyof T as K extends string | number ? K : never]: Unstubify<T[K], SupportedTypes> }
   : T;
 
 // You can put promises anywhere in the params and they'll be resolved before delivery.
@@ -140,13 +148,15 @@ type UnstubifyInner<T> =
 // Keep raw non-stub members so generic assignability still works when UnstubifyInner<T> is deferred.
 // Remove stub members from mixed unions so callback params don’t get both stub and unstubbed signatures.
 // Marker carried by map() callback inputs. This lets primitive placeholders flow through params.
-type Unstubify<T> =
+type Unstubify<T, SupportedTypes = BaseType> =
   | NonStubMembers<T>
-  | UnstubifyInner<T>
-  | Promise<UnstubifyInner<T>>
-  | MapValuePlaceholder<UnstubifyInner<T>>;
+  | UnstubifyInner<T, SupportedTypes>
+  | Promise<UnstubifyInner<T, SupportedTypes>>
+  | MapValuePlaceholder<UnstubifyInner<T, SupportedTypes>>;
 
-type UnstubifyAll<A extends readonly unknown[]> = { [I in keyof A]: Unstubify<A[I]> };
+type UnstubifyAll<A extends readonly unknown[], SupportedTypes = BaseType> = {
+  [I in keyof A]: Unstubify<A[I], SupportedTypes>;
+};
 
 interface MapValuePlaceholder<T> {
   [__RPC_MAP_VALUE_BRAND]: T;
@@ -166,11 +176,11 @@ type MaybeDisposable<T> = T extends object ? Disposable : unknown;
 // Technically, we use custom thenables here, but they quack like `Promise`s.
 // Intersecting with `(Maybe)Provider` allows pipelining.
 // prettier-ignore
-type Result<R> =
+type Result<R, SupportedTypes = BaseType> =
   IsAny<R> extends true ? UnknownResult
   : IsUnknown<R> extends true ? UnknownResult
-  : R extends Stubable ? Promise<Stub<R>> & Provider<R> & StubBase<R>
-  : R extends RpcCompatible<R> ? Promise<Stubify<R> & MaybeDisposable<R>> & Provider<R> & StubBase<R>
+  : R extends Stubable ? Promise<Stub<R, SupportedTypes>> & Provider<R, SupportedTypes> & StubBase<R>
+  : R extends RpcCompatible<R, SupportedTypes> ? Promise<Stubify<R, SupportedTypes> & MaybeDisposable<R>> & Provider<R, SupportedTypes> & StubBase<R>
   : never;
 
 type IsAny<T> = 0 extends (1 & T) ? true : false;
@@ -181,22 +191,22 @@ type UnknownResult = Promise<unknown> & Provider<unknown> & StubBase<unknown>;
 // Unwrapping `Stub`s allows calling with `Stubable` arguments.
 // For properties, rewrite types to be `Result`s.
 // In each case, unwrap `Promise`s.
-type MethodOrProperty<V> = V extends (...args: infer P) => infer R
-  ? (...args: UnstubifyAll<P>) => IsAny<R> extends true ? UnknownResult : Result<Awaited<R>>
-  : Result<Awaited<V>>;
+type MethodOrProperty<V, SupportedTypes = BaseType> = V extends (...args: infer P) => infer R
+  ? (...args: UnstubifyAll<P, SupportedTypes>) => IsAny<R> extends true ? UnknownResult : Result<Awaited<R>, SupportedTypes>
+  : Result<Awaited<V>, SupportedTypes>;
 
 // Type for the callable part of an `Provider` if `T` is callable.
 // This is intersected with methods/properties.
-type MaybeCallableProvider<T> = T extends (...args: any[]) => any
-  ? MethodOrProperty<T>
+type MaybeCallableProvider<T, SupportedTypes = BaseType> = T extends (...args: any[]) => any
+  ? MethodOrProperty<T, SupportedTypes>
   : unknown;
 
 type TupleIndexKeys<T extends ReadonlyArray<unknown>> = Extract<keyof T, `${number}`>;
-type MapCallbackValue<T> =
+type MapCallbackValue<T, SupportedTypes = BaseType> =
   // `Omit` removes call signatures, so re-intersect callable provider behavior.
   T extends unknown
-    ? Omit<Result<T>, keyof Promise<unknown>> &
-        MaybeCallableProvider<T> &
+    ? Omit<Result<T, SupportedTypes>, keyof Promise<unknown>> &
+        MaybeCallableProvider<T, SupportedTypes> &
         MapValuePlaceholder<T>
     : never;
 type InvalidNativePromiseInMapResult<T, Seen = never> =
@@ -224,27 +234,29 @@ type InvalidNativePromiseInMapResultImpl<T, Seen> =
   : never;
 type MapCallbackReturn<T> =
   InvalidNativePromiseInMapResult<T> extends never ? T : never;
-type ArrayProvider<E> = {
-  [K in number]: MethodOrProperty<E>;
+type ArrayProvider<E, SupportedTypes = BaseType> = {
+  [K in number]: MethodOrProperty<E, SupportedTypes>;
 } & {
-  map<V>(callback: (elem: MapCallbackValue<E>) => MapCallbackReturn<V>): Result<Array<V>>;
+  map<V>(
+    callback: (elem: MapCallbackValue<E, SupportedTypes>) => MapCallbackReturn<V>,
+  ): Result<Array<V>, SupportedTypes>;
 };
-type TupleProvider<T extends ReadonlyArray<unknown>> = {
-  [K in TupleIndexKeys<T>]: MethodOrProperty<T[K]>;
-} & ArrayProvider<T[number]>;
+type TupleProvider<T extends ReadonlyArray<unknown>, SupportedTypes = BaseType> = {
+  [K in TupleIndexKeys<T>]: MethodOrProperty<T[K], SupportedTypes>;
+} & ArrayProvider<T[number], SupportedTypes>;
 
 // Base type for all other types providing RPC-like interfaces.
 // Rewrites all methods/properties to be `MethodOrProperty`s, while preserving callable types.
-export type Provider<T> = MaybeCallableProvider<T> &
+export type Provider<T, SupportedTypes = BaseType> = MaybeCallableProvider<T, SupportedTypes> &
   (T extends ReadonlyArray<unknown>
-    ? number extends T["length"] ? ArrayProvider<T[number]> : TupleProvider<T>
+    ? number extends T["length"] ? ArrayProvider<T[number], SupportedTypes> : TupleProvider<T, SupportedTypes>
     : {
         [K in Exclude<
           keyof T,
           symbol | keyof StubBase<never>
-        >]: MethodOrProperty<T[K]>;
+        >]: MethodOrProperty<T[K], SupportedTypes>;
       } & {
         map<V>(
-          callback: (value: MapCallbackValue<NonNullable<T>>) => MapCallbackReturn<V>
-        ): Result<Array<V>>;
+          callback: (value: MapCallbackValue<NonNullable<T>, SupportedTypes>) => MapCallbackReturn<V>
+        ): Result<Array<V>, SupportedTypes>;
       });
