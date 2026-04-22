@@ -31,11 +31,16 @@ export { RpcPayload, StubHook, makeCallResultPayload } from "./core.js";
 // Raw types that custom transports / serializers compose against.
 export type { Stub, Provider, Stubify } from "./types.js";
 
-// ---------------------------------------------------------------------------
-// Generic RpcStub — no defaulted SupportedTypes. Custom transports define
-// their own concrete alias (e.g. WebSocketRpcStub<T>).
-// ---------------------------------------------------------------------------
-
+/**
+ * Represents a reference to a remote object, on which methods may be remotely invoked via RPC.
+ *
+ * `RpcStub` can represent any interface (when using TypeScript, you pass the specific interface
+ * type as `T`, but this isn't known at runtime). The way this works is, `RpcStub` is actually a
+ * `Proxy`. It makes itself appear as if every possible method / property name is defined. You can
+ * invoke any method name, and the invocation will be sent to the server. If it turns out that no
+ * such method exists on the remote object, an exception is thrown back. But the client does not
+ * actually know, until that point, what methods exist.
+ */
 export type RpcStub<
   T extends RpcCompatible<T, SupportedTypes>,
   SupportedTypes,
@@ -48,10 +53,24 @@ export const RpcStub: {
   new <T extends RpcCompatible<T>>(value: T): RpcStub<T, BaseType>;
 } = <any>RpcStubImpl;
 
-// ---------------------------------------------------------------------------
-// Generic RpcPromise — no defaulted SupportedTypes.
-// ---------------------------------------------------------------------------
-
+/**
+ * Represents the result of an RPC call.
+ *
+ * Also used to represent properties. That is, `stub.foo` evaluates to an `RpcPromise` for the
+ * value of `foo`.
+ *
+ * This isn't actually a JavaScript `Promise`. It does, however, have `then()`, `catch()`, and
+ * `finally()` methods, like `Promise` does, and because it has a `then()` method, JavaScript will
+ * allow you to treat it like a promise, e.g. you can `await` it.
+ *
+ * An `RpcPromise` is also a proxy, just like `RpcStub`, where calling methods or awaiting
+ * properties will make a pipelined network request.
+ *
+ * Note that an `RpcPromise` is "lazy": the actual final result is not requested from the server
+ * until you actually `await` the promise (or call `then()`, etc. on it). This is an optimization:
+ * if you only intend to use the promise for pipelining and you never await it, then there's no
+ * need to transmit the resolution!
+ */
 export type RpcPromise<
   T extends RpcCompatible<T, SupportedTypes>,
   SupportedTypes,
@@ -61,10 +80,11 @@ export const RpcPromise: {
   // Note: Cannot construct directly!
 } = <any>RpcPromiseImpl;
 
-// ---------------------------------------------------------------------------
-// Generic RpcSession — no defaulted Message or SupportedTypes.
-// ---------------------------------------------------------------------------
-
+/**
+ * Use to construct an `RpcSession` on top of a custom `RpcTransport`.
+ *
+ * Most people won't use this. You only need it if you've implemented your own `RpcTransport`.
+ */
 export interface RpcSession<
   T extends RpcCompatible<T, SupportedTypes>,
   Message,
@@ -88,10 +108,6 @@ export const RpcSession: {
       localMain?: any,
       options?: RpcSessionOptions): RpcSession<T, Message, SupportedTypes>;
 } = <any>RpcSessionImpl;
-
-// ---------------------------------------------------------------------------
-// RpcTarget
-// ---------------------------------------------------------------------------
 
 /**
  * Classes which are intended to be passed by reference and called over RPC must extend

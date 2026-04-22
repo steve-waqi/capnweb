@@ -10,11 +10,7 @@ import type { RpcCompatible } from "../../index.js";
 import type { IncomingMessage, ServerResponse, OutgoingHttpHeader, OutgoingHttpHeaders } from "node:http";
 import type { SupportedTypes, RpcStub } from "./types.js";
 
-export type { RpcStub, RpcPromise, RpcSession, RpcSessionOptions, RpcTarget, RpcTransport, RpcSerializer, SupportedTypes } from "./types.js";
-
-// ---------------------------------------------------------------------------
-// Client-side batch transport
-// ---------------------------------------------------------------------------
+export type { RpcStub, RpcPromise, RpcSession, RpcSessionOptions, RpcTransport, RpcSerializer, SupportedTypes } from "./types.js";
 
 type SendBatchFunc = (batch: string[]) => Promise<string[]>;
 
@@ -32,6 +28,9 @@ class BatchClientTransport implements RpcTransport<string, BaseType> {
   #batchToReceive: string[] | null = null;
 
   async send(message: string): Promise<void> {
+    // If the batch was already sent, we just ignore the message, because throwing may cause the
+    // RPC system to abort prematurely. Once the last receive() is done then we'll throw an error
+    // that aborts the RPC system at the right time and will propagate to all other requests.
     if (this.#batchToSend !== null) {
       this.#batchToSend.push(message);
     }
@@ -46,6 +45,8 @@ class BatchClientTransport implements RpcTransport<string, BaseType> {
     if (msg !== undefined) {
       return msg;
     } else {
+      // No more messages. An error thrown here will propagate out of any calls that are still
+      // open.
       throw new Error("Batch RPC request ended.");
     }
   }
@@ -55,6 +56,13 @@ class BatchClientTransport implements RpcTransport<string, BaseType> {
   }
 
   async #scheduleBatch(sendBatch: SendBatchFunc) {
+    // Wait for microtask queue to clear before sending a batch.
+    //
+    // Note that simply waiting for one turn of the microtask queue (await Promise.resolve()) is
+    // not good enough here as the application needs a chance to call `.then()` on every RPC
+    // promise in order to explicitly indicate they want the results. Unfortunately, `await`ing
+    // a thenable does not call `.then()` immediately -- for some reason it waits for a turn of
+    // the microtask queue first, *then* calls `.then()`.
     await new Promise(resolve => setTimeout(resolve, 0));
 
     if (this.#aborted !== undefined) {
@@ -67,6 +75,13 @@ class BatchClientTransport implements RpcTransport<string, BaseType> {
   }
 }
 
+/**
+ * Initiate an HTTP batch session from the client side.
+ *
+ * The parameters to this method have exactly the same signature as `fetch()`, but the return
+ * value is an RpcStub. You can customize anything about the request except for the method
+ * (it will always be set to POST) and the body (which the RPC system will fill in).
+ */
 export function newHttpBatchRpcSession<
   T extends RpcCompatible<T, SupportedTypes> = undefined,
 >(
@@ -91,10 +106,6 @@ export function newHttpBatchRpcSession<
   let rpc = new RpcSessionImpl(transport, undefined, options);
   return rpc.getRemoteMain() as any;
 }
-
-// ---------------------------------------------------------------------------
-// Server-side batch transport
-// ---------------------------------------------------------------------------
 
 class BatchServerTransport implements RpcTransport<string, BaseType> {
   readonly serializer: RpcSerializer<string, BaseType> = defaultRpcSerializer;
@@ -155,6 +166,13 @@ export async function newHttpBatchRpcResponse(
 
   let transport = new BatchServerTransport(batch);
   let rpc = new RpcSessionImpl(transport, localMain, options);
+
+  // TODO: Arguably we should arrange so any attempts to pull promise resolutions from the client
+  //   will reject rather than just hang. But it IS valid to make server->client calls in order to
+  //   then pipeline the result into something returned to the client. We don't want the errors to
+  //   prematurely cancel anything that would eventually complete. So for now we just say, it's the
+  //   app's responsibility to not wait on any server -> client calls since they will never
+  //   complete.
 
   await transport.whenAllReceived();
   await rpc.drain();

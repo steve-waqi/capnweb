@@ -9,11 +9,7 @@ import type { BaseType } from "../types.js";
 import type { RpcCompatible } from "../index.js";
 import type { SupportedTypes, RpcStub } from "./types.js";
 
-export type { RpcStub, RpcPromise, RpcSession, RpcSessionOptions, RpcTarget, RpcTransport, RpcSerializer, SupportedTypes } from "./types.js";
-
-// ---------------------------------------------------------------------------
-// MessagePort transport
-// ---------------------------------------------------------------------------
+export type { RpcStub, RpcPromise, RpcSession, RpcSessionOptions, RpcTransport, RpcSerializer, SupportedTypes } from "./types.js";
 
 class MessagePortTransport implements RpcTransport<string, BaseType> {
   readonly serializer: RpcSerializer<string, BaseType> = defaultRpcSerializer;
@@ -21,14 +17,12 @@ class MessagePortTransport implements RpcTransport<string, BaseType> {
   constructor (port: MessagePort) {
     this.#port = port;
 
-    // Start listening for messages
     port.start();
 
     port.addEventListener("message", (event: MessageEvent<any>) => {
       if (this.#error) {
         // Ignore further messages.
       } else if (event.data === null) {
-        // Peer is signaling that they're closing the connection
         this.#receivedError(new Error("Peer closed MessagePort connection."));
       } else if (typeof event.data === "string") {
         if (this.#receiveResolver) {
@@ -75,17 +69,15 @@ class MessagePortTransport implements RpcTransport<string, BaseType> {
   }
 
   abort?(reason: any): void {
-    // Send close signal to peer before closing
     try {
       this.#port.postMessage(null);
-    } catch (err) {
-      // Ignore errors when sending close signal - port might already be closed
-    }
+    } catch (err) {}
 
     this.#port.close();
 
     if (!this.#error) {
       this.#error = reason;
+      // No need to call receiveRejecter(); RPC implementation will stop listening anyway.
     }
   }
 
@@ -101,10 +93,11 @@ class MessagePortTransport implements RpcTransport<string, BaseType> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Factory function
-// ---------------------------------------------------------------------------
-
+/**
+ * Initiate an RPC session over a MessagePort, which is particularly useful for communicating
+ * between an iframe and its parent frame in a browser context. Each side should call this function
+ * on its own end of the MessageChannel.
+ */
 export function newMessagePortRpcSession<
   T extends RpcCompatible<T, SupportedTypes> = undefined,
 >(

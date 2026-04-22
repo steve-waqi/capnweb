@@ -11,11 +11,7 @@ import type { BaseType } from "../../types.js";
 import type { RpcCompatible } from "../../index.js";
 import type { SupportedTypes, RpcStub } from "./types.js";
 
-export type { RpcStub, RpcPromise, RpcSession, RpcSessionOptions, RpcTarget, RpcTransport, RpcSerializer, SupportedTypes } from "./types.js";
-
-// ---------------------------------------------------------------------------
-// WebSocket transport
-// ---------------------------------------------------------------------------
+export type { RpcStub, RpcPromise, RpcSession, RpcSessionOptions, RpcTransport, RpcSerializer, SupportedTypes } from "./types.js";
 
 class WebSocketTransport implements RpcTransport<string, BaseType> {
   readonly serializer: RpcSerializer<string, BaseType> = defaultRpcSerializer;
@@ -73,7 +69,6 @@ class WebSocketTransport implements RpcTransport<string, BaseType> {
     if (this.#sendQueue === undefined) {
       this.#webSocket.send(message);
     } else {
-      // Not open yet, queue for later.
       this.#sendQueue.push(message);
     }
   }
@@ -102,6 +97,7 @@ class WebSocketTransport implements RpcTransport<string, BaseType> {
 
     if (!this.#error) {
       this.#error = reason;
+      // No need to call receiveRejecter(); RPC implementation will stop listening anyway.
     }
   }
 
@@ -117,10 +113,14 @@ class WebSocketTransport implements RpcTransport<string, BaseType> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Factory functions
-// ---------------------------------------------------------------------------
-
+/**
+ * Start a WebSocket session given either an already-open WebSocket or a URL.
+ *
+ * @param webSocket Either the `wss://` URL to connect to, or an already-open WebSocket object to
+ *     use.
+ * @param localMain The main RPC interface to expose to the peer. Returns a stub for the main
+ *     interface exposed from the peer.
+ */
 export function newWebSocketRpcSession<
   T extends RpcCompatible<T, SupportedTypes> = undefined,
 >(
