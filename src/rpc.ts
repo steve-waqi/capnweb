@@ -3,37 +3,18 @@
 //     https://opensource.org/license/mit
 
 import { StubHook, RpcPayload, RpcStub, PropertyPath, PayloadStubHook, ErrorStubHook, RpcTarget, unwrapStubAndPath, streamImpl } from "./core.js";
-import { Devaluator, Evaluator, ExportId, ImportId, Exporter, Importer, serialize } from "./serialize.js";
+import { ExportId, ImportId, Exporter, Importer, serialize } from "./serialize.js";
+import type { BaseType } from "./types.js";
+import {
+  defaultMessageSize,
+  type OutgoingExpression,
+  type OutgoingRpcMessage,
+  type RpcSerializer,
+  type RpcTransport,
+} from "./serializer.js";
 
-/**
- * Interface for an RPC transport, which is a simple bidirectional message stream. Implement this
- * interface if the built-in transports (e.g. for HTTP batch and WebSocket) don't meet your needs.
- */
-export interface RpcTransport {
-  /**
-   * Sends a message to the other end.
-   */
-  send(message: string): Promise<void>;
-
-  /**
-   * Receives a message sent by the other end.
-   *
-   * If and when the transport becomes disconnected, this will reject. The thrown error will be
-   * propagated to all outstanding calls and future calls on any stubs associated with the session.
-   * If there are no outstanding calls (and none are made in the future), then the error does not
-   * propagate anywhere -- this is considered a "clean" shutdown.
-   */
-  receive(): Promise<string>;
-
-  /**
-   * Indicates that the RPC system has suffered an error that prevents the session from continuing.
-   * The transport should ideally try to send any queued messages if it can, and then close the
-   * connection. (It's not strictly necessary to deliver queued messages, but the last message sent
-   * before abort() is called is often an "abort" message, which communicates the error to the
-   * peer, so if that is dropped, the peer may have less information about what happened.)
-   */
-  abort?(reason: any): void;
-}
+// Re-export so existing imports `from "./rpc.js"` keep working (index.ts etc.).
+export type { RpcTransport, RpcSerializer } from "./serializer.js";
 
 // Entry on the exports table.
 type ExportTableEntry = {
@@ -52,8 +33,8 @@ type ExportTableEntry = {
 };
 
 // Entry on the imports table.
-class ImportTableEntry {
-  constructor(public session: RpcSessionImpl, public importId: number, pulling: boolean) {
+class ImportTableEntry<M, S> {
+  constructor(public session: RpcSessionImpl<M, S>, public importId: number, pulling: boolean) {
     if (pulling) {
       this.activePull = Promise.withResolvers<void>();
     }
@@ -168,22 +149,22 @@ class ImportTableEntry {
   }
 };
 
-class RpcImportHook extends StubHook {
-  public entry?: ImportTableEntry;  // undefined when we're disposed
+class RpcImportHook<M, S> extends StubHook {
+  public entry?: ImportTableEntry<M, S>;  // undefined when we're disposed
 
   // `pulling` is true if we already expect that this import is going to be resolved later, and
   // null if this import is not allowed to be pulled (i.e. it's a stub not a promise).
-  constructor(public isPromise: boolean, entry: ImportTableEntry) {
+  constructor(public isPromise: boolean, entry: ImportTableEntry<M, S>) {
     super();
     ++entry.localRefcount;
     this.entry = entry;
   }
 
-  collectPath(path: PropertyPath): RpcImportHook {
+  collectPath(path: PropertyPath): RpcImportHook<M, S> {
     return this;
   }
 
-  getEntry(): ImportTableEntry {
+  getEntry(): ImportTableEntry<M, S> {
     if (this.entry) {
       return this.entry;
     } else {
@@ -215,7 +196,7 @@ class RpcImportHook extends StubHook {
   }
 
   map(path: PropertyPath, captures: StubHook[], instructions: unknown[]): StubHook {
-    let entry: ImportTableEntry;
+    let entry: ImportTableEntry<M, S>;
     try {
       entry = this.getEntry();
     } catch (err) {
@@ -241,8 +222,8 @@ class RpcImportHook extends StubHook {
     }
   }
 
-  dup(): RpcImportHook {
-    return new RpcImportHook(false, this.getEntry());
+  dup(): RpcImportHook<M, S> {
+    return new RpcImportHook<M, S>(false, this.getEntry());
   }
 
   pull(): RpcPayload | Promise<RpcPayload> {
@@ -282,10 +263,10 @@ class RpcImportHook extends StubHook {
   }
 }
 
-class RpcMainHook extends RpcImportHook {
-  private session?: RpcSessionImpl;
+class RpcMainHook<M, S> extends RpcImportHook<M, S> {
+  private session?: RpcSessionImpl<M, S>;
 
-  constructor(entry: ImportTableEntry) {
+  constructor(entry: ImportTableEntry<M, S>) {
     super(false, entry);
     this.session = entry.session;
   }
@@ -318,12 +299,13 @@ export type RpcSessionOptions = {
   onSendError?: (error: Error) => Error | void;
 };
 
-class RpcSessionImpl implements Importer, Exporter {
+class RpcSessionImpl<M, S> implements Importer, Exporter {
   private exports: Array<ExportTableEntry> = [];
   private reverseExports: Map<StubHook, ExportId> = new Map();
-  private imports: Array<ImportTableEntry> = [];
+  private imports: Array<ImportTableEntry<M, S>> = [];
   private abortReason?: any;
   private cancelReadLoop: (error: any) => void;
+  private serializer: RpcSerializer<M, S>;
 
   // We assign positive numbers to imports we initiate, and negative numbers to exports we
   // initiate. So the next import ID is just `imports.length`, but the next export ID needs
@@ -340,13 +322,15 @@ class RpcSessionImpl implements Importer, Exporter {
   // may be deleted from the middle (hence leaving the array sparse).
   onBrokenCallbacks: ((error: any) => void)[] = [];
 
-  constructor(private transport: RpcTransport, mainHook: StubHook,
+  constructor(private transport: RpcTransport<M, S>, mainHook: StubHook,
       private options: RpcSessionOptions) {
+    this.serializer = transport.serializer;
+
     // Export zero is automatically the bootstrap object.
     this.exports.push({hook: mainHook, refcount: 1});
 
     // Import zero is the other side's bootstrap object.
-    this.imports.push(new ImportTableEntry(this, 0, false));
+    this.imports.push(new ImportTableEntry<M, S>(this, 0, false));
 
     let rejectFunc: (error: any) => void;;
     let abortPromise = new Promise<never>((resolve, reject) => { rejectFunc = reject; });
@@ -356,8 +340,8 @@ class RpcSessionImpl implements Importer, Exporter {
   }
 
   // Should only be called once immediately after construction.
-  getMainImport(): RpcImportHook {
-    return new RpcMainHook(this.imports[0]);
+  getMainImport(): RpcImportHook<M, S> {
+    return new RpcMainHook<M, S>(this.imports[0]);
   }
 
   shutdown(): void {
@@ -460,12 +444,11 @@ class RpcSessionImpl implements Importer, Exporter {
         payload => {
           // We don't transfer ownership of stubs in the payload since the payload
           // belongs to the hook which sticks around to handle pipelined requests.
-          let value = Devaluator.devaluate(payload.value, undefined, this, payload);
-          this.send(["resolve", exportId, value]);
+          this.send({ kind: "resolve", exportId, value: payload.value, source: payload });
           if (autoRelease) this.releaseExport(exportId, 1);
         },
         error => {
-          this.send(["reject", exportId, Devaluator.devaluate(error, undefined, this)]);
+          this.send({ kind: "reject", exportId, error });
           if (autoRelease) this.releaseExport(exportId, 1);
         }
       ).catch(
@@ -473,7 +456,7 @@ class RpcSessionImpl implements Importer, Exporter {
           // If serialization failed, report the serialization error, which should
           // itself always be serializable.
           try {
-            this.send(["reject", exportId, Devaluator.devaluate(error, undefined, this)]);
+            this.send({ kind: "reject", exportId, error });
             if (autoRelease) this.releaseExport(exportId, 1);
           } catch (error2) {
             // TODO: Shouldn't happen, now what?
@@ -498,15 +481,15 @@ class RpcSessionImpl implements Importer, Exporter {
     }
   }
 
-  importStub(idx: ImportId): RpcImportHook {
+  importStub(idx: ImportId): RpcImportHook<M, S> {
     if (this.abortReason) throw this.abortReason;
 
     let entry = this.imports[idx];
     if (!entry) {
-      entry = new ImportTableEntry(this, idx, false);
+      entry = new ImportTableEntry<M, S>(this, idx, false);
       this.imports[idx] = entry;
     }
-    return new RpcImportHook(/*isPromise=*/false, entry);
+    return new RpcImportHook<M, S>(/*isPromise=*/false, entry);
   }
 
   importPromise(idx: ImportId): StubHook {
@@ -519,9 +502,9 @@ class RpcSessionImpl implements Importer, Exporter {
     }
 
     // Create an already-pulling hook.
-    let entry = new ImportTableEntry(this, idx, true);
+    let entry = new ImportTableEntry<M, S>(this, idx, true);
     this.imports[idx] = entry;
-    return new RpcImportHook(/*isPromise=*/true, entry);
+    return new RpcImportHook<M, S>(/*isPromise=*/true, entry);
   }
 
   getExport(idx: ExportId): StubHook | undefined {
@@ -541,15 +524,15 @@ class RpcSessionImpl implements Importer, Exporter {
   createPipe(readable: ReadableStream, readableHook: StubHook): ImportId {
     if (this.abortReason) throw this.abortReason;
 
-    this.send(["pipe"]);
+    this.send({ kind: "pipe" });
 
     let importId = this.imports.length;
     // The pipe import is not a promise -- it's immediately usable as a writable stream.
-    let entry = new ImportTableEntry(this, importId, false);
+    let entry = new ImportTableEntry<M, S>(this, importId, false);
     this.imports.push(entry);
 
     // Create a proxy WritableStream from the import hook and pump the ReadableStream into it.
-    let hook = new RpcImportHook(/*isPromise=*/false, entry);
+    let hook = new RpcImportHook<M, S>(/*isPromise=*/false, entry);
     let writable = streamImpl.createWritableStreamFromHook(hook);
     readable.pipeTo(writable).catch(() => {
       // Errors are handled by the writable stream's error handling -- either the write fails
@@ -560,71 +543,53 @@ class RpcSessionImpl implements Importer, Exporter {
     return importId;
   }
 
-  // Serializes and sends a message. Returns the byte length of the serialized message.
-  private send(msg: any): number {
+  // Serializes and sends a message. Returns the byte/character length of the serialized
+  // message. Serialization errors propagate to the caller: ensureResolvingExport's catch
+  // turns them into rejects, matching today's "non-serializable return value" behavior.
+  private send(msg: OutgoingRpcMessage): number {
     if (this.abortReason !== undefined) {
       // Ignore sends after we've aborted.
       return 0;
     }
 
-    let msgText: string;
-    try {
-      msgText = JSON.stringify(msg);
-    } catch (err) {
-      // If JSON stringification failed, there's something wrong with the devaluator, as it should
-      // not allow non-JSONable values to be injected in the first place.
-      try { this.abort(err); } catch (err2) {}
-      throw err;
-    }
+    let wire = this.serializer.serialize(msg, this);
 
-    this.transport.send(msgText)
+    this.transport.send(wire)
         // If send fails, abort the connection, but don't try to send an abort message since
         // that'll probably also fail.
         .catch(err => this.abort(err, false));
 
-    return msgText.length;
+    return this.serializer.sizeOf ? this.serializer.sizeOf(wire) : defaultMessageSize(wire);
   }
 
-  sendCall(id: ImportId, path: PropertyPath, args?: RpcPayload): RpcImportHook {
+  sendCall(id: ImportId, path: PropertyPath, args?: RpcPayload): RpcImportHook<M, S> {
     if (this.abortReason) throw this.abortReason;
 
-    let value: Array<any> = ["pipeline", id, path];
-    if (args) {
-      let devalue = Devaluator.devaluate(args.value, undefined, this, args);
+    this.send({ kind: "push", expression: { kind: "call", importId: id, path, args } });
 
-      // HACK: Since the args is an array, devaluator will wrap in a second array. Need to unwrap.
-      // TODO: Clean this up somehow.
-      value.push((<Array<unknown>>devalue)[0]);
+    // Serializing the payload takes ownership of all stubs within, so the payload itself
+    // does not need to be disposed.
 
-      // Serializing the payload takes ownership of all stubs within, so the payload itself does
-      // not need to be disposed.
-    }
-    this.send(["push", value]);
-
-    let entry = new ImportTableEntry(this, this.imports.length, false);
+    let entry = new ImportTableEntry<M, S>(this, this.imports.length, false);
     this.imports.push(entry);
-    return new RpcImportHook(/*isPromise=*/true, entry);
+    return new RpcImportHook<M, S>(/*isPromise=*/true, entry);
   }
 
   sendStream(id: ImportId, path: PropertyPath, args: RpcPayload)
       : {promise: Promise<void>, size: number} {
     if (this.abortReason) throw this.abortReason;
 
-    let value: Array<any> = ["pipeline", id, path];
-    let devalue = Devaluator.devaluate(args.value, undefined, this, args);
-
-    // HACK: Since the args is an array, devaluator will wrap in a second array. Need to unwrap.
-    // TODO: Clean this up somehow.
-    value.push((<Array<unknown>>devalue)[0]);
-
-    let size = this.send(["stream", value]);
+    let size = this.send({
+      kind: "stream",
+      expression: { kind: "call", importId: id, path, args },
+    });
 
     // Create the import entry in "already pulling" state (pulling=true), since stream messages
     // are automatically pulled. Set remoteRefcount to 0 so that resolve() won't send a release
     // message — the server implicitly releases the export after sending the resolve. Set
     // localRefcount to 1 so that resolve() doesn't treat this as already-disposed.
     let importId = this.imports.length;
-    let entry = new ImportTableEntry(this, importId, /*pulling=*/true);
+    let entry = new ImportTableEntry<M, S>(this, importId, /*pulling=*/true);
     entry.remoteRefcount = 0;
     entry.localRefcount = 1;
     this.imports.push(entry);
@@ -641,7 +606,7 @@ class RpcSessionImpl implements Importer, Exporter {
   }
 
   sendMap(id: ImportId, path: PropertyPath, captures: StubHook[], instructions: unknown[])
-      : RpcImportHook {
+      : RpcImportHook<M, S> {
     if (this.abortReason) {
       for (let cap of captures) {
         cap.dispose();
@@ -649,34 +614,24 @@ class RpcSessionImpl implements Importer, Exporter {
       throw this.abortReason;
     }
 
-    let devaluedCaptures = captures.map(hook => {
-      let importId = this.getImport(hook);
-      if (importId !== undefined) {
-        return ["import", importId];
-      } else {
-        return ["export", this.exportStub(hook)];
-      }
+    this.send({
+      kind: "push",
+      expression: { kind: "map", importId: id, path, captures, instructions },
     });
 
-    let value = ["remap", id, path, devaluedCaptures, instructions];
-
-    this.send(["push", value]);
-
-    let entry = new ImportTableEntry(this, this.imports.length, false);
+    let entry = new ImportTableEntry<M, S>(this, this.imports.length, false);
     this.imports.push(entry);
-    return new RpcImportHook(/*isPromise=*/true, entry);
+    return new RpcImportHook<M, S>(/*isPromise=*/true, entry);
   }
 
   sendPull(id: ImportId) {
     if (this.abortReason) throw this.abortReason;
-
-    this.send(["pull", id]);
+    this.send({ kind: "pull", importId: id });
   }
 
   sendRelease(id: ImportId, remoteRefcount: number) {
     if (this.abortReason) return;
-
-    this.send(["release", id, remoteRefcount]);
+    this.send({ kind: "release", importId: id, refcount: remoteRefcount });
     delete this.imports[id];
   }
 
@@ -688,9 +643,8 @@ class RpcSessionImpl implements Importer, Exporter {
 
     if (trySendAbortMessage) {
       try {
-        this.transport.send(JSON.stringify(["abort", Devaluator
-            .devaluate(error, undefined, this)]))
-            .catch(err => {});
+        let wire = this.serializer.serialize({ kind: "abort", reason: error }, this);
+        this.transport.send(wire).catch(err => {});
       } catch (err) {
         // ignore, probably the whole reason we're aborting is because the transport is broken
       }
@@ -736,115 +690,90 @@ class RpcSessionImpl implements Importer, Exporter {
 
   private async readLoop(abortPromise: Promise<never>) {
     while (!this.abortReason) {
-      let msg = JSON.parse(await Promise.race([this.transport.receive(), abortPromise]));
+      let wire = await Promise.race([this.transport.receive(), abortPromise]);
       if (this.abortReason) break;  // check again before processing
 
-      if (msg instanceof Array) {
-        switch (msg[0]) {
-          case "push":  // ["push", Expression]
-            if (msg.length > 1) {
-              let payload = new Evaluator(this).evaluate(msg[1]);
-              let hook = new PayloadStubHook(payload);
+      let msg = this.serializer.deserialize(wire, this);
 
-              // It's possible for a rejection to occur before the client gets a chance to send
-              // a "pull" message or to use the promise in a pipeline. We don't want that to be
-              // treated as an unhandled rejection on our end.
-              hook.ignoreUnhandledRejections();
+      switch (msg.kind) {
+        case "push": {
+          let hook = new PayloadStubHook(msg.payload);
 
-              this.exports.push({ hook, refcount: 1 });
-              continue;
-            }
-            break;
+          // It's possible for a rejection to occur before the client gets a chance to send
+          // a "pull" message or to use the promise in a pipeline. We don't want that to be
+          // treated as an unhandled rejection on our end.
+          hook.ignoreUnhandledRejections();
 
-          case "stream": {  // ["stream", Expression]
-            // Like "push", but:
-            // - Promise pipelining on the result is not supported.
-            // - The export is automatically considered "pulled".
-            // - Once the "resolve" is sent, the export is implicitly released.
-            if (msg.length > 1) {
-              let payload = new Evaluator(this).evaluate(msg[1]);
-              let hook = new PayloadStubHook(payload);
-              hook.ignoreUnhandledRejections();
+          this.exports.push({ hook, refcount: 1 });
+          continue;
+        }
 
-              let exportId = this.exports.length;
-              this.exports.push({ hook, refcount: 1, autoRelease: true });
+        case "stream": {
+          // Like "push", but:
+          // - Promise pipelining on the result is not supported.
+          // - The export is automatically considered "pulled".
+          // - Once the "resolve" is sent, the export is implicitly released.
+          let hook = new PayloadStubHook(msg.payload);
+          hook.ignoreUnhandledRejections();
 
-              // Automatically pull since stream messages are always pulled.
-              this.ensureResolvingExport(exportId);
-              continue;
-            }
-            break;
+          let exportId = this.exports.length;
+          this.exports.push({ hook, refcount: 1, autoRelease: true });
+
+          this.ensureResolvingExport(exportId);
+          continue;
+        }
+
+        case "pipe": {
+          // Create a TransformStream. The writable end becomes the export (so the sender can
+          // write/close/abort it). The readable end is stashed for later retrieval via a
+          // subsequent "readable" reference on the wire.
+          let { readable, writable } = new TransformStream();
+          let hook = streamImpl.createWritableStreamHook(writable);
+          this.exports.push({ hook, refcount: 1, pipeReadable: readable });
+          continue;
+        }
+
+        case "pull":
+          this.ensureResolvingExport(msg.importId);
+          continue;
+
+        case "resolve": {
+          // The sender's exportId is our importId.
+          let imp = this.imports[msg.exportId];
+          if (imp) {
+            imp.resolve(new PayloadStubHook(msg.payload));
+          } else {
+            // We released this import already, so the resolution is unwanted. Dispose the
+            // payload so any stubs it contains are released.
+            msg.payload.dispose();
           }
+          continue;
+        }
 
-          case "pipe": {  // ["pipe"]
-            // Create a TransformStream. The writable end becomes the export (so the sender can
-            // write/close/abort it). The readable end is stashed for later retrieval via
-            // ["readable", importId].
-            let { readable, writable } = new TransformStream();
-            let hook = streamImpl.createWritableStreamHook(writable);
-            this.exports.push({ hook, refcount: 1, pipeReadable: readable });
-            continue;
+        case "reject": {
+          let imp = this.imports[msg.exportId];
+          if (imp) {
+            // HACK: We expect errors are always simple values (no stubs) so we can just
+            //   pull the value out of the payload.
+            msg.payload.dispose();  // should be a no-op
+            imp.resolve(new ErrorStubHook(msg.payload.value));
+          } else {
+            msg.payload.dispose();
           }
+          continue;
+        }
 
-          case "pull": {  // ["pull", ImportId]
-            let exportId = msg[1];
-            if (typeof exportId == "number") {
-              this.ensureResolvingExport(exportId);
-              continue;
-            }
-            break;
-          }
+        case "release":
+          this.releaseExport(msg.importId, msg.refcount);
+          continue;
 
-          case "resolve":   // ["resolve", ExportId, Expression]
-          case "reject": {  // ["reject", ExportId, Expression]
-            let importId = msg[1];
-            if (typeof importId == "number" && msg.length > 2) {
-              let imp = this.imports[importId];
-              if (imp) {
-                if (msg[0] == "resolve") {
-                  imp.resolve(new PayloadStubHook(new Evaluator(this).evaluate(msg[2])));
-                } else {
-                  // HACK: We expect errors are always simple values (no stubs) so we can just
-                  //   pull the value out of the payload.
-                  let payload = new Evaluator(this).evaluate(msg[2]);
-                  payload.dispose();  // just in case -- should be no-op
-                  imp.resolve(new ErrorStubHook(payload.value));
-                }
-              } else {
-                // Import ID is not found on the table. Probably we released it already, in which
-                // case we do not care about the resolution, so whatever.
-
-                if (msg[0] == "resolve") {
-                  // We need to evaluate the resolution and immediately dispose it so that we
-                  // release any stubs it contains.
-                  new Evaluator(this).evaluate(msg[2]).dispose();
-                }
-              }
-              continue;
-            }
-            break;
-          }
-
-          case "release": {
-            let exportId = msg[1];
-            let refcount = msg[2];
-            if (typeof exportId == "number" && typeof refcount == "number") {
-              this.releaseExport(exportId, refcount);
-              continue;
-            }
-            break;
-          }
-
-          case "abort": {
-            let payload = new Evaluator(this).evaluate(msg[1]);
-            payload.dispose();  // just in case -- should be no-op
-            this.abort(payload, false);
-            break;
-          }
+        case "abort": {
+          let payload = msg.payload;
+          payload.dispose();  // just in case -- should be no-op
+          this.abort(payload, false);
+          break;
         }
       }
-
-      throw new Error(`bad RPC message: ${JSON.stringify(msg)}`);
     }
   }
 
@@ -875,18 +804,18 @@ class RpcSessionImpl implements Importer, Exporter {
 
 // Public interface that wraps RpcSession and hides private implementation details (even from
 // JavaScript with no type enforcement).
-export class RpcSession {
-  #session: RpcSessionImpl;
+export class RpcSession<M = string, S = BaseType> {
+  #session: RpcSessionImpl<M, S>;
   #mainStub: RpcStub;
 
-  constructor(transport: RpcTransport, localMain?: any, options: RpcSessionOptions = {}) {
+  constructor(transport: RpcTransport<M, S>, localMain?: any, options: RpcSessionOptions = {}) {
     let mainHook: StubHook;
     if (localMain) {
       mainHook = new PayloadStubHook(RpcPayload.fromAppReturn(localMain));
     } else {
       mainHook = new ErrorStubHook(new Error("This connection has no main object."));
     }
-    this.#session = new RpcSessionImpl(transport, mainHook, options);
+    this.#session = new RpcSessionImpl<M, S>(transport, mainHook, options);
     this.#mainStub = new RpcStub(this.#session.getMainImport());
   }
 

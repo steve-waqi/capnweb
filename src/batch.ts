@@ -3,12 +3,17 @@
 //     https://opensource.org/license/mit
 
 import { RpcStub } from "./core.js";
-import { RpcTransport, RpcSession, RpcSessionOptions } from "./rpc.js";
+import { RpcSession, RpcSessionOptions } from "./rpc.js";
+import type { RpcSerializer, RpcTransport } from "./serializer.js";
+import { defaultRpcSerializer } from "./default-serializer.js";
+import type { BaseType } from "./types.js";
 import type { IncomingMessage, ServerResponse, OutgoingHttpHeader, OutgoingHttpHeaders } from "node:http";
 
 type SendBatchFunc = (batch: string[]) => Promise<string[]>;
 
-class BatchClientTransport implements RpcTransport {
+class BatchClientTransport implements RpcTransport<string, BaseType> {
+  readonly serializer: RpcSerializer<string, BaseType> = defaultRpcSerializer;
+
   constructor(sendBatch: SendBatchFunc) {
     this.#promise = this.#scheduleBatch(sendBatch);
   }
@@ -89,7 +94,9 @@ export function newHttpBatchRpcSession(
   return rpc.getRemoteMain();
 }
 
-class BatchServerTransport implements RpcTransport {
+class BatchServerTransport implements RpcTransport<string, BaseType> {
+  readonly serializer: RpcSerializer<string, BaseType> = defaultRpcSerializer;
+
   constructor(batch: string[]) {
     this.#batchToReceive = batch;
   }

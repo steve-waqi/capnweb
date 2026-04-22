@@ -5,7 +5,7 @@
 import { expect, it, describe, inject } from "vitest"
 import { deserialize, serialize, RpcSession, type RpcSessionOptions, RpcTransport, RpcTarget,
          RpcStub, newWebSocketRpcSession, newMessagePortRpcSession,
-         newHttpBatchRpcSession} from "../src/index.js"
+         newHttpBatchRpcSession, defaultRpcSerializer} from "../src/index.js"
 import { Counter, TestTarget } from "./test-util.js";
 
 let SERIALIZE_TEST_CASES: Record<string, unknown> = {
@@ -174,6 +174,8 @@ describe("simple serialization", () => {
 // =======================================================================================
 
 class TestTransport implements RpcTransport {
+  readonly serializer = defaultRpcSerializer;
+
   constructor(public name: string, private partner?: TestTransport) {
     if (partner) {
       partner.partner = this;

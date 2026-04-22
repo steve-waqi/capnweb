@@ -1,8 +1,10 @@
 import {
+  RpcSession,
   RpcTarget,
   type BaseType,
   type RpcCompatible,
   type RpcStub,
+  type RpcTransport,
 } from "../src/index.js"
 import type { Provider, Stub, Stubify } from "../src/types.js"
 import type { Equal, Expect } from "./helpers.js"
@@ -67,3 +69,24 @@ declare const customApi: RpcStub<Api, MyExtras>
 type _CustomApiKeepsUrl = Expect<
   Equal<Awaited<ReturnType<typeof customApi.getRecord>>["u"], URL>
 >
+
+// When a transport declares `<Uint8Array, MyExtras>`, the session constructed from it must
+// carry those parameters all the way into the RpcStub returned by getRemoteMain(). This
+// ties the runtime serializer (bundled on the transport) to the compile-time RpcCompatible
+// check that gates what values can flow through it.
+declare const customTransport: RpcTransport<Uint8Array, MyExtras>
+const customSession = new RpcSession<Api, Uint8Array, MyExtras>(customTransport)
+const customMain = customSession.getRemoteMain()
+
+// URL flows through return positions unchanged (intersected with Disposable).
+type _CustomMainSurfaces = Expect<
+  Awaited<ReturnType<typeof customMain.echoUrl>> extends URL ? true : false
+>
+type _CustomMainArgAcceptsUrl = Expect<
+  URL extends Parameters<typeof customMain.echoUrl>[0] ? true : false
+>
+
+// Default string-based sessions still compile with their own SupportedTypes = BaseType.
+declare const stringTransport: RpcTransport
+const defaultSession = new RpcSession<Api>(stringTransport)
+void defaultSession.getRemoteMain()

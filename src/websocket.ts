@@ -5,7 +5,10 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import { RpcStub } from "./core.js";
-import { RpcTransport, RpcSession, RpcSessionOptions } from "./rpc.js";
+import { RpcSession, RpcSessionOptions } from "./rpc.js";
+import type { RpcSerializer, RpcTransport } from "./serializer.js";
+import { defaultRpcSerializer } from "./default-serializer.js";
+import type { BaseType } from "./types.js";
 
 export function newWebSocketRpcSession(
     webSocket: WebSocket | string, localMain?: any, options?: RpcSessionOptions): RpcStub {
@@ -38,7 +41,9 @@ export function newWorkersWebSocketRpcResponse(
   });
 }
 
-class WebSocketTransport implements RpcTransport {
+class WebSocketTransport implements RpcTransport<string, BaseType> {
+  readonly serializer: RpcSerializer<string, BaseType> = defaultRpcSerializer;
+
   constructor (webSocket: WebSocket) {
     this.#webSocket = webSocket;
 

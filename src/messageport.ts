@@ -3,7 +3,10 @@
 //     https://opensource.org/license/mit
 
 import { RpcStub } from "./core.js";
-import { RpcTransport, RpcSession, RpcSessionOptions } from "./rpc.js";
+import { RpcSession, RpcSessionOptions } from "./rpc.js";
+import type { RpcSerializer, RpcTransport } from "./serializer.js";
+import { defaultRpcSerializer } from "./default-serializer.js";
+import type { BaseType } from "./types.js";
 
 // Start a MessagePort session given a MessagePort or a pair of MessagePorts.
 //
@@ -16,7 +19,9 @@ export function newMessagePortRpcSession(
   return rpc.getRemoteMain();
 }
 
-class MessagePortTransport implements RpcTransport {
+class MessagePortTransport implements RpcTransport<string, BaseType> {
+  readonly serializer: RpcSerializer<string, BaseType> = defaultRpcSerializer;
+
   constructor (port: MessagePort) {
     this.#port = port;
 

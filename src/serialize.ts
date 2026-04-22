@@ -403,8 +403,12 @@ export class Devaluator {
 }
 
 /**
- * Serialize a value, using Cap'n Web's underlying serialization. This won't be able to serialize
- * RPC stubs, but it will support basic data types.
+ * Serialize a value using Cap'n Web's underlying value-level wire format (JSON-encoded
+ * tagged arrays). Cannot serialize RPC stubs, but supports the basic data types.
+ *
+ * This is a standalone helper for one-off value marshaling and is independent of the
+ * session/message-level `RpcSerializer` extension point -- custom wire formats should
+ * be plugged in through `RpcTransport.serializer`, not here.
  */
 export function serialize(value: unknown): string {
   return JSON.stringify(Devaluator.devaluate(value));
@@ -832,7 +836,10 @@ export class Evaluator {
 }
 
 /**
- * Deserialize a value serialized using serialize().
+ * Deserialize a string produced by `serialize()`.
+ *
+ * Like `serialize()`, this is a standalone helper for Cap'n Web's value-level wire
+ * format and is independent of the session-level `RpcSerializer`.
  */
 export function deserialize(value: string): unknown {
   let payload = new Evaluator(NULL_IMPORTER).evaluate(JSON.parse(value));

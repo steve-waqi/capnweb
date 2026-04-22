@@ -4,7 +4,9 @@
 
 import { RpcTarget as RpcTargetImpl, RpcStub as RpcStubImpl, RpcPromise as RpcPromiseImpl } from "./core.js";
 import { serialize, deserialize } from "./serialize.js";
-import { RpcTransport, RpcSession as RpcSessionImpl, RpcSessionOptions } from "./rpc.js";
+import { RpcSession as RpcSessionImpl, RpcSessionOptions } from "./rpc.js";
+import type { RpcTransport, RpcSerializer } from "./serializer.js";
+import { defaultRpcSerializer } from "./default-serializer.js";
 import { BaseType, RpcTargetBranded, RpcCompatible, Stub, Stubify, __RPC_TARGET_BRAND } from "./types.js";
 import { newWebSocketRpcSession as newWebSocketRpcSessionImpl,
          newWorkersWebSocketRpcResponse } from "./websocket.js";
@@ -19,8 +21,18 @@ forceInitStreams();
 
 // Re-export public API types.
 export { serialize, deserialize, newWorkersWebSocketRpcResponse, newHttpBatchRpcResponse,
-         nodeHttpBatchRpcResponse };
-export type { RpcTransport, RpcSessionOptions, RpcCompatible, BaseType };
+         nodeHttpBatchRpcResponse, defaultRpcSerializer };
+export type { RpcTransport, RpcSerializer, RpcSessionOptions, RpcCompatible, BaseType };
+
+// Building blocks for authoring a custom RpcSerializer. These are the types and classes
+// a custom wire format composes against; most users never need them.
+export type {
+  OutgoingRpcMessage, OutgoingExpression, IncomingRpcMessage,
+} from "./serializer.js";
+export type { Exporter, Importer, ExportId, ImportId } from "./serialize.js";
+export { Devaluator, Evaluator } from "./serialize.js";
+export type { PropertyPath } from "./core.js";
+export { RpcPayload, StubHook, makeCallResultPayload } from "./core.js";
 
 // Hack the type system to make RpcStub's types work nicely!
 /**
@@ -79,6 +91,7 @@ export const RpcPromise: {
  */
 export interface RpcSession<
   T extends RpcCompatible<T, SupportedTypes> = undefined,
+  Message = string,
   SupportedTypes = BaseType,
 > {
   getRemoteMain(): RpcStub<T, SupportedTypes>;
@@ -91,9 +104,12 @@ export interface RpcSession<
 export const RpcSession: {
   new <
     T extends RpcCompatible<T, SupportedTypes> = undefined,
+    Message = string,
     SupportedTypes = BaseType,
   >(
-      transport: RpcTransport, localMain?: any, options?: RpcSessionOptions): RpcSession<T, SupportedTypes>;
+      transport: RpcTransport<Message, SupportedTypes>,
+      localMain?: any,
+      options?: RpcSessionOptions): RpcSession<T, Message, SupportedTypes>;
 } = <any>RpcSessionImpl;
 
 // RpcTarget needs some hackage too to brand it properly and account for the implementation

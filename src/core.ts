@@ -631,6 +631,20 @@ async function pullPromise(promise: RpcPromise): Promise<unknown> {
 
 export type LocatedPromise = {parent: object, property: string | number, promise: RpcPromise};
 
+// Wraps a StubHook produced by `hook.call()` / `hook.get()` / `hook.map()` in an
+// RpcPayload suitable for returning as the `payload` of an incoming push/stream/resolve
+// message. Custom RpcSerializer implementations need this when they decode a pipelined
+// call expression against their Importer.
+export function makeCallResultPayload(hook: StubHook): RpcPayload {
+  let hooks: StubHook[] = [];
+  let promises: LocatedPromise[] = [];
+  let payload = RpcPayload.forEvaluate(hooks, promises);
+  let promise = new RpcPromise(hook, []);
+  promises.push({ promise, parent: payload, property: "value" });
+  payload.value = promise;
+  return payload;
+}
+
 // Represents the params to an RPC call, or the resolution of an RPC promise, as it passes
 // through the system.
 //
