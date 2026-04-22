@@ -73,7 +73,7 @@ export type IncomingRpcMessage =
 // `SupportedTypes` is a phantom type parameter that drives the compile-time
 // `RpcCompatible<T, SupportedTypes>` check. It is the set of leaf values this serializer can
 // carry unchanged (beyond BaseType, which is always supported).
-export interface RpcSerializer<Message = string, SupportedTypes = BaseType> {
+export interface RpcSerializer<Message, SupportedTypes> {
   // Errors thrown here propagate to the caller. For `resolve` / `reject` of a pulled export,
   // the session's resolution pipeline catches and converts the error into a reject message,
   // matching today's behavior for non-serializable return values. Errors during abort
@@ -95,7 +95,7 @@ export interface RpcSerializer<Message = string, SupportedTypes = BaseType> {
 // this (along with a matching RpcSerializer) if the built-in transports (HTTP batch, WebSocket,
 // MessagePort) don't meet your needs. The `serializer` field ties the transport's wire format
 // to the set of leaf values it preserves.
-export interface RpcTransport<Message = string, SupportedTypes = BaseType> {
+export interface RpcTransport<Message, SupportedTypes> {
   send(message: Message): Promise<void>;
 
   // Receives the next message sent by the other end.

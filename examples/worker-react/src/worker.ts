@@ -1,4 +1,6 @@
-import { newWorkersRpcResponse, RpcTarget } from 'capnweb';
+import { RpcTarget } from 'capnweb';
+import { newHttpBatchRpcResponse } from 'capnweb/http/batch';
+import { newWorkersWebSocketRpcResponse } from 'capnweb/http/websocket';
 
 type Env = {
   DELAY_AUTH_MS?: string;
@@ -72,7 +74,15 @@ export default {
       const rttJitter = Number(env.SIMULATED_RTT_JITTER_MS ?? 0);
       if (rttBase || rttJitter) await sleep(jittered(rttBase, rttJitter));
 
-      const resp = await newWorkersRpcResponse(request, new Api(env));
+      let resp: Response;
+      if (request.method === 'POST') {
+        resp = await newHttpBatchRpcResponse(request, new Api(env));
+        resp.headers.set('Access-Control-Allow-Origin', '*');
+      } else if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+        resp = newWorkersWebSocketRpcResponse(request, new Api(env));
+      } else {
+        resp = new Response('This endpoint only accepts POST or WebSocket requests.', { status: 400 });
+      }
 
       // Simulate downlink latency (server -> browser)
       if (rttBase || rttJitter) await sleep(jittered(rttBase, rttJitter));

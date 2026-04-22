@@ -20,6 +20,21 @@
         "workerd": "./dist/index-workers.cjs",
         "default": "./dist/index.cjs"
       }
+    },
+    "./http/batch": {
+      "types": "./dist/http/batch/index.d.ts",
+      "import": "./dist/http/batch/index.js",
+      "require": "./dist/http/batch/index.cjs"
+    },
+    "./http/websocket": {
+      "types": "./dist/http/websocket/index.d.ts",
+      "import": "./dist/http/websocket/index.js",
+      "require": "./dist/http/websocket/index.cjs"
+    },
+    "./messageport": {
+      "types": "./dist/messageport/index.d.ts",
+      "import": "./dist/messageport/index.js",
+      "require": "./dist/messageport/index.cjs"
     }
   },
   "type": "module",

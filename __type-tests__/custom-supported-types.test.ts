@@ -86,7 +86,7 @@ type _CustomMainArgAcceptsUrl = Expect<
   URL extends Parameters<typeof customMain.echoUrl>[0] ? true : false
 >
 
-// Default string-based sessions still compile with their own SupportedTypes = BaseType.
-declare const stringTransport: RpcTransport
-const defaultSession = new RpcSession<Api>(stringTransport)
+// Default string-based sessions still compile with explicit BaseType.
+declare const stringTransport: RpcTransport<string, BaseType>
+const defaultSession = new RpcSession<Api, string, BaseType>(stringTransport)
 void defaultSession.getRemoteMain()

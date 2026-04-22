@@ -3,11 +3,12 @@ import {
   RpcSession,
   RpcStub,
   RpcTarget,
-  newHttpBatchRpcSession,
-  newWebSocketRpcSession,
+  BaseType,
   type RpcCompatible,
   type RpcTransport,
 } from "../src/index.js"
+import { newHttpBatchRpcSession } from "../src/http/batch/index.js"
+import { newWebSocketRpcSession } from "../src/http/websocket/index.js"
 import { expectAssignable, expectType, type Equal, type Expect } from "./helpers.js"
 
 type Formatter = (value: number) => Promise<string>
@@ -47,9 +48,9 @@ interface PublicApi {
   getCounterAsync(seed: number): Promise<Counter>
   getMaybeCounter(seed: number): Promise<Counter | undefined>
   getCounterTable(): Promise<Record<string, Counter>>
-  bumpCounter(counter: RpcStub<Counter>, by?: number): Promise<number>
-  mergeCounters(counters: Record<string, RpcStub<Counter>>): Promise<number>
-  invokeFormatter(formatter: RpcStub<Formatter>, value: number): Promise<string>
+  bumpCounter(counter: RpcStub<Counter, BaseType>, by?: number): Promise<number>
+  mergeCounters(counters: Record<string, RpcStub<Counter, BaseType>>): Promise<number>
+  invokeFormatter(formatter: RpcStub<Formatter, BaseType>, value: number): Promise<string>
 
   getUser(userId: number): Promise<User>
   getMaybeUser(userId: number): Promise<User | null>
@@ -82,47 +83,47 @@ type _RpcCompatibleChecks = [
   >
 ]
 
-declare const api: RpcStub<PublicApi>
-declare const transport: RpcTransport
+declare const api: RpcStub<PublicApi, BaseType>
+declare const transport: RpcTransport<string, BaseType>
 declare const localCounter: Counter
-declare const counterStub: RpcStub<Counter>
-declare const counterPromise: RpcPromise<Counter>
-declare const counterTable: Record<string, Counter | RpcStub<Counter>>
+declare const counterStub: RpcStub<Counter, BaseType>
+declare const counterPromise: RpcPromise<Counter, BaseType>
+declare const counterTable: Record<string, Counter | RpcStub<Counter, BaseType>>
 declare const byteReadable: ReadableStream<Uint8Array>
 declare const genericWritable: WritableStream<any>
 declare const textReadable: ReadableStream<string>
-declare const namePromise: RpcPromise<string>
-declare const stepPromise: RpcPromise<number>
-declare const counterTablePromise: RpcPromise<Record<string, Counter>>
+declare const namePromise: RpcPromise<string, BaseType>
+declare const stepPromise: RpcPromise<number, BaseType>
+declare const counterTablePromise: RpcPromise<Record<string, Counter>, BaseType>
 
 // Session constructors and transport helpers should all produce the same RpcStub surface.
 const localStub = new RpcStub(new Counter())
-expectType<RpcStub<Counter>>(localStub)
+expectType<RpcStub<Counter, BaseType>>(localStub)
 
-const session = new RpcSession<PublicApi>(transport)
-expectType<RpcStub<PublicApi>>(session.getRemoteMain())
+const session = new RpcSession<PublicApi, string, BaseType>(transport)
+expectType<RpcStub<PublicApi, BaseType>>(session.getRemoteMain())
 
-const wsApi = newWebSocketRpcSession<PublicApi>("wss://example.com/rpc")
-const batchApi = newHttpBatchRpcSession<PublicApi>("https://example.com/rpc")
-expectType<RpcStub<PublicApi>>(wsApi)
-expectType<RpcStub<PublicApi>>(batchApi)
+const wsApi = newWebSocketRpcSession<PublicApi, string, BaseType>("wss://example.com/rpc")
+const batchApi = newHttpBatchRpcSession<PublicApi, string, BaseType>("https://example.com/rpc")
+expectType<RpcStub<PublicApi, BaseType>>(wsApi)
+expectType<RpcStub<PublicApi, BaseType>>(batchApi)
 
 // Positive coverage for direct calls, pipelining, and accepted promise-like arguments.
 const ping = api.ping()
 expectAssignable<Promise<number>>(ping)
-expectType<RpcPromise<number>>(ping)
+expectType<RpcPromise<number, BaseType>>(ping)
 
 const pingAsync = api.pingAsync()
 expectAssignable<Promise<number>>(pingAsync)
-expectType<RpcPromise<number>>(pingAsync)
+expectType<RpcPromise<number, BaseType>>(pingAsync)
 
 const pingVoid = api.pingVoid()
 expectAssignable<Promise<void>>(pingVoid)
-expectType<RpcPromise<void>>(pingVoid)
+expectType<RpcPromise<void, BaseType>>(pingVoid)
 
 const pingUndefined = api.pingUndefined()
 expectAssignable<Promise<undefined>>(pingUndefined)
-expectType<RpcPromise<undefined>>(pingUndefined)
+expectType<RpcPromise<undefined, BaseType>>(pingUndefined)
 
 const users = api.listUsers()
 const userNames = users.map((user) => user.getName())
@@ -160,27 +161,27 @@ type _AwaitedListUsers = Awaited<ReturnType<typeof api.listUsers>>
 type _AwaitedGetPair = Awaited<ReturnType<typeof api.getPair>>
 type _AwaitedGetNested = Awaited<ReturnType<typeof api.getNested>>
 
-type _GetUserIsStub = Expect<Equal<_AwaitedGetUser, RpcStub<User>>>
+type _GetUserIsStub = Expect<Equal<_AwaitedGetUser, RpcStub<User, BaseType>>>
 type _GetMaybeCounterIsStubified = Expect<
-  Equal<_AwaitedGetMaybeCounter, RpcStub<Counter> | undefined>
+  Equal<_AwaitedGetMaybeCounter, RpcStub<Counter, BaseType> | undefined>
 >
 type _CounterTableValueIsStubified = Expect<
   Equal<
     _AwaitedGetCounterTable extends Record<string, infer Value> ? Value : never,
-    RpcStub<Counter>
+    RpcStub<Counter, BaseType>
   >
 >
 type _ListUsersValueIsStubified = Expect<
-  Equal<_AwaitedListUsers[number], RpcStub<User>>
+  Equal<_AwaitedListUsers[number], RpcStub<User, BaseType>>
 >
 type _PairTupleElementsAreStubified = [
-  Expect<Equal<_AwaitedGetPair[0], RpcStub<Counter>>>,
-  Expect<Equal<_AwaitedGetPair[1], RpcStub<Counter>>>
+  Expect<Equal<_AwaitedGetPair[0], RpcStub<Counter, BaseType>>>,
+  Expect<Equal<_AwaitedGetPair[1], RpcStub<Counter, BaseType>>>
 ]
 type _NestedObjectIsStubified = [
-  Expect<Equal<_AwaitedGetNested["owner"], RpcStub<User>>>,
-  Expect<Equal<_AwaitedGetNested["members"][number], RpcStub<User>>>,
-  Expect<Equal<_AwaitedGetNested["mainCounter"], RpcStub<Counter>>>
+  Expect<Equal<_AwaitedGetNested["owner"], RpcStub<User, BaseType>>>,
+  Expect<Equal<_AwaitedGetNested["members"][number], RpcStub<User, BaseType>>>,
+  Expect<Equal<_AwaitedGetNested["mainCounter"], RpcStub<Counter, BaseType>>>
 ]
 
 async function assertAwaitedShapes() {
@@ -192,24 +193,24 @@ async function assertAwaitedShapes() {
   const fromSync = await api.getCounter(1)
   const fromAsync = await api.getCounterAsync(1)
   const maybeCounter = await api.getMaybeCounter(2)
-  expectType<RpcStub<Counter>>(fromSync)
-  expectType<RpcStub<Counter>>(fromAsync)
-  expectType<RpcStub<Counter> | undefined>(maybeCounter)
+  expectType<RpcStub<Counter, BaseType>>(fromSync)
+  expectType<RpcStub<Counter, BaseType>>(fromAsync)
+  expectType<RpcStub<Counter, BaseType> | undefined>(maybeCounter)
 
   const counterTableResult = await api.getCounterTable()
-  expectType<RpcStub<Counter>>(counterTableResult.primary)
+  expectType<RpcStub<Counter, BaseType>>(counterTableResult.primary)
 
   const [left, right] = await api.getPair()
-  expectType<RpcStub<Counter>>(left)
-  expectType<RpcStub<Counter>>(right)
+  expectType<RpcStub<Counter, BaseType>>(left)
+  expectType<RpcStub<Counter, BaseType>>(right)
 
   const nested = await api.getNested()
-  expectType<RpcStub<User>>(nested.owner)
-  expectType<RpcStub<User>>(nested.members[0])
-  expectType<RpcStub<Counter>>(nested.mainCounter)
+  expectType<RpcStub<User, BaseType>>(nested.owner)
+  expectType<RpcStub<User, BaseType>>(nested.members[0])
+  expectType<RpcStub<Counter, BaseType>>(nested.mainCounter)
 
   const users = await api.listUsers()
-  expectType<RpcStub<User>>(users[0])
+  expectType<RpcStub<User, BaseType>>(users[0])
 
   const sumResult = await api.sum([10, 11, 12])
   const mergeResult = await api.mergeCounters(counterTable)
@@ -221,7 +222,7 @@ async function assertAwaitedShapes() {
 
 void assertAwaitedShapes
 
-declare const formatterStub: RpcStub<Formatter>
+declare const formatterStub: RpcStub<Formatter, BaseType>
 expectAssignable<Promise<string>>(formatterStub(1))
 
 // Negative checks (must fail type-checking).
@@ -265,8 +266,8 @@ api.acceptStreams(byteReadable, new Uint8Array())
 // @ts-expect-error RpcPromise is not a plain number
 const shouldBeErrorNumber: number = api.ping()
 
-// @ts-expect-error RpcPromise<number> is not Promise<string>
+// @ts-expect-error RpcPromise<number, BaseType> is not Promise<string>
 const shouldBeErrorStringPromise: Promise<string> = api.ping()
 
 // @ts-expect-error transport must implement RpcTransport
-new RpcSession<PublicApi>({})
+new RpcSession<PublicApi, string, BaseType>({})

@@ -5,7 +5,13 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/index-workers.ts'],
+  entry: [
+    'src/index.ts',
+    'src/index-workers.ts',
+    'src/http/batch/index.ts',
+    'src/http/websocket/index.ts',
+    'src/messageport/index.ts',
+  ],
   format: ['esm', 'cjs'],
   external: ['cloudflare:workers'],
   dts: true,

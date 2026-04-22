@@ -4,42 +4,18 @@
 
 /// <reference types="@cloudflare/workers-types" />
 
-import { RpcStub } from "./core.js";
-import { RpcSession, RpcSessionOptions } from "./rpc.js";
-import type { RpcSerializer, RpcTransport } from "./serializer.js";
-import { defaultRpcSerializer } from "./default-serializer.js";
-import type { BaseType } from "./types.js";
+import { RpcSession as RpcSessionImpl, RpcSessionOptions } from "../../rpc.js";
+import type { RpcSerializer, RpcTransport } from "../../serializer.js";
+import { defaultRpcSerializer } from "../../default-serializer.js";
+import type { BaseType } from "../../types.js";
+import type { RpcCompatible } from "../../index.js";
+import type { SupportedTypes, RpcStub } from "./types.js";
 
-export function newWebSocketRpcSession(
-    webSocket: WebSocket | string, localMain?: any, options?: RpcSessionOptions): RpcStub {
-  if (typeof webSocket === "string") {
-    webSocket = new WebSocket(webSocket);
-  }
+export type { RpcStub, RpcPromise, RpcSession, RpcSessionOptions, RpcTarget, RpcTransport, RpcSerializer, SupportedTypes } from "./types.js";
 
-  let transport = new WebSocketTransport(webSocket);
-  let rpc = new RpcSession(transport, localMain, options);
-  return rpc.getRemoteMain();
-}
-
-/**
- * For use in Cloudflare Workers: Construct an HTTP response that starts a WebSocket RPC session
- * with the given `localMain`.
- */
-export function newWorkersWebSocketRpcResponse(
-    request: Request, localMain?: any, options?: RpcSessionOptions): Response {
-  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-    return new Response("This endpoint only accepts WebSocket requests.", { status: 400 });
-  }
-
-  let pair = new WebSocketPair();
-  let server = pair[0];
-  server.accept()
-  newWebSocketRpcSession(server, localMain, options);
-  return new Response(null, {
-    status: 101,
-    webSocket: pair[1],
-  });
-}
+// ---------------------------------------------------------------------------
+// WebSocket transport
+// ---------------------------------------------------------------------------
 
 class WebSocketTransport implements RpcTransport<string, BaseType> {
   readonly serializer: RpcSerializer<string, BaseType> = defaultRpcSerializer;
@@ -126,7 +102,6 @@ class WebSocketTransport implements RpcTransport<string, BaseType> {
 
     if (!this.#error) {
       this.#error = reason;
-      // No need to call receiveRejecter(); RPC implementation will stop listening anyway.
     }
   }
 
@@ -140,4 +115,42 @@ class WebSocketTransport implements RpcTransport<string, BaseType> {
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Factory functions
+// ---------------------------------------------------------------------------
+
+export function newWebSocketRpcSession<
+  T extends RpcCompatible<T, SupportedTypes> = undefined,
+>(
+  webSocket: WebSocket | string, localMain?: any, options?: RpcSessionOptions
+): RpcStub<T> {
+  if (typeof webSocket === "string") {
+    webSocket = new WebSocket(webSocket);
+  }
+
+  let transport = new WebSocketTransport(webSocket);
+  let rpc = new RpcSessionImpl(transport, localMain, options);
+  return rpc.getRemoteMain() as any;
+}
+
+/**
+ * For use in Cloudflare Workers: Construct an HTTP response that starts a WebSocket RPC session
+ * with the given `localMain`.
+ */
+export function newWorkersWebSocketRpcResponse(
+    request: Request, localMain?: any, options?: RpcSessionOptions): Response {
+  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+    return new Response("This endpoint only accepts WebSocket requests.", { status: 400 });
+  }
+
+  let pair = new WebSocketPair();
+  let server = pair[0];
+  server.accept()
+  newWebSocketRpcSession(server, localMain, options);
+  return new Response(null, {
+    status: 101,
+    webSocket: pair[1],
+  });
 }

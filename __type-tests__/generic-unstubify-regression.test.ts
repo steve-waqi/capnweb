@@ -1,6 +1,6 @@
 // Regression tests for generic Unstubify — verifies that generic type parameters
 // flow correctly through RpcStub call signatures.
-import { RpcStub, RpcTarget } from "../src/index.js"
+import { RpcStub, RpcTarget, BaseType } from "../src/index.js"
 
 // ── User's original repro ──────────────────────────────────────────────────────
 
@@ -32,7 +32,7 @@ export function plainGenericWorks<E extends DemoEventName>(
 export function rpcStubGenericNowWorks<E extends DemoEventName>(
   name: E,
   data: DemoEventMap[E],
-  callback: RpcStub<(event: DemoEventWithName<E>) => void>
+  callback: RpcStub<(event: DemoEventWithName<E>) => void, BaseType>
 ): void {
   // Previously: E is not assignable to Unstubify<E> in RpcStub callback params
   callback({ name, data })
@@ -41,7 +41,7 @@ export function rpcStubGenericNowWorks<E extends DemoEventName>(
 export function rpcStubBroadPayloadWorks(
   name: DemoEventName,
   data: DemoEventMap[DemoEventName],
-  callback: RpcStub<(event: DemoEventPayload) => void>
+  callback: RpcStub<(event: DemoEventPayload) => void, BaseType>
 ): void {
   callback({ name, data })
 }
@@ -59,7 +59,7 @@ type Job<T extends string> = {
 }
 
 export function submitJob<T extends string>(
-  stub: RpcStub<(job: Job<T>) => void>,
+  stub: RpcStub<(job: Job<T>) => void, BaseType>,
   job: Job<T>
 ): void {
   stub(job)
@@ -68,7 +68,7 @@ export function submitJob<T extends string>(
 // ── Generic tuple / readonly array params ───────────────────────────────────────
 
 export function withPair<A extends string, B extends number>(
-  cb: RpcStub<(pair: readonly [A, B]) => void>,
+  cb: RpcStub<(pair: readonly [A, B]) => void, BaseType>,
   a: A,
   b: B
 ): void {

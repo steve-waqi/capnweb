@@ -13,9 +13,6 @@ import {
   type RpcTransport,
 } from "./serializer.js";
 
-// Re-export so existing imports `from "./rpc.js"` keep working (index.ts etc.).
-export type { RpcTransport, RpcSerializer } from "./serializer.js";
-
 // Entry on the exports table.
 type ExportTableEntry = {
   hook: StubHook,

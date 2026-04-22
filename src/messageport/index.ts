@@ -2,22 +2,18 @@
 // Licensed under the MIT license found in the LICENSE.txt file or at:
 //     https://opensource.org/license/mit
 
-import { RpcStub } from "./core.js";
-import { RpcSession, RpcSessionOptions } from "./rpc.js";
-import type { RpcSerializer, RpcTransport } from "./serializer.js";
-import { defaultRpcSerializer } from "./default-serializer.js";
-import type { BaseType } from "./types.js";
+import { RpcSession as RpcSessionImpl, RpcSessionOptions } from "../rpc.js";
+import type { RpcSerializer, RpcTransport } from "../serializer.js";
+import { defaultRpcSerializer } from "../default-serializer.js";
+import type { BaseType } from "../types.js";
+import type { RpcCompatible } from "../index.js";
+import type { SupportedTypes, RpcStub } from "./types.js";
 
-// Start a MessagePort session given a MessagePort or a pair of MessagePorts.
-//
-// `localMain` is the main RPC interface to expose to the peer. Returns a stub for the main
-// interface exposed from the peer.
-export function newMessagePortRpcSession(
-    port: MessagePort, localMain?: any, options?: RpcSessionOptions): RpcStub {
-  let transport = new MessagePortTransport(port);
-  let rpc = new RpcSession(transport, localMain, options);
-  return rpc.getRemoteMain();
-}
+export type { RpcStub, RpcPromise, RpcSession, RpcSessionOptions, RpcTarget, RpcTransport, RpcSerializer, SupportedTypes } from "./types.js";
+
+// ---------------------------------------------------------------------------
+// MessagePort transport
+// ---------------------------------------------------------------------------
 
 class MessagePortTransport implements RpcTransport<string, BaseType> {
   readonly serializer: RpcSerializer<string, BaseType> = defaultRpcSerializer;
@@ -90,7 +86,6 @@ class MessagePortTransport implements RpcTransport<string, BaseType> {
 
     if (!this.#error) {
       this.#error = reason;
-      // No need to call receiveRejecter(); RPC implementation will stop listening anyway.
     }
   }
 
@@ -104,4 +99,18 @@ class MessagePortTransport implements RpcTransport<string, BaseType> {
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Factory function
+// ---------------------------------------------------------------------------
+
+export function newMessagePortRpcSession<
+  T extends RpcCompatible<T, SupportedTypes> = undefined,
+>(
+  port: MessagePort, localMain?: any, options?: RpcSessionOptions
+): RpcStub<T> {
+  let transport = new MessagePortTransport(port);
+  let rpc = new RpcSessionImpl(transport, localMain, options);
+  return rpc.getRemoteMain() as any;
 }

@@ -4,8 +4,10 @@
 
 import { expect, it, describe, inject } from "vitest"
 import { deserialize, serialize, RpcSession, type RpcSessionOptions, RpcTransport, RpcTarget,
-         RpcStub, newWebSocketRpcSession, newMessagePortRpcSession,
-         newHttpBatchRpcSession, defaultRpcSerializer} from "../src/index.js"
+         RpcStub, defaultRpcSerializer, BaseType} from "../src/index.js"
+import { newHttpBatchRpcSession } from "../src/http/batch/index.js"
+import { newWebSocketRpcSession } from "../src/http/websocket/index.js"
+import { newMessagePortRpcSession } from "../src/messageport/index.js"
 import { Counter, TestTarget } from "./test-util.js";
 
 let SERIALIZE_TEST_CASES: Record<string, unknown> = {
@@ -173,7 +175,7 @@ describe("simple serialization", () => {
 
 // =======================================================================================
 
-class TestTransport implements RpcTransport {
+class TestTransport implements RpcTransport<string, BaseType> {
   readonly serializer = defaultRpcSerializer;
 
   constructor(public name: string, private partner?: TestTransport) {
@@ -249,20 +251,17 @@ async function pumpMicrotasks() {
 class TestHarness<T extends RpcTarget> {
   clientTransport: TestTransport;
   serverTransport: TestTransport;
-  client: RpcSession<T>;
-  server: RpcSession;
+  client: RpcSession<T, string, BaseType>;
+  server: RpcSession<undefined, string, BaseType>;
 
-  stub: RpcStub<T>;
+  stub: RpcStub<T, BaseType>;
 
   constructor(target: T, serverOptions?: RpcSessionOptions) {
     this.clientTransport = new TestTransport("client");
     this.serverTransport = new TestTransport("server", this.clientTransport);
 
-    this.client = new RpcSession<T>(this.clientTransport);
-
-    // TODO: If I remove `<undefined>` here, I get a TypeScript error about the instantiation being
-    //   excessively deep and possibly infinite. Why? `<undefined>` is supposed to be the default.
-    this.server = new RpcSession<undefined>(this.serverTransport, target, serverOptions);
+    this.client = new RpcSession<T, string, BaseType>(this.clientTransport);
+    this.server = new RpcSession<undefined, string, BaseType>(this.serverTransport, target, serverOptions);
 
     this.stub = this.client.getRemoteMain();
   }
@@ -806,7 +805,7 @@ describe("capability-passing", () => {
 
     class BobTarget extends RpcTarget {
       // Bob actually uses the counter, causing calls to proxy through Bob to Alice
-      incrementCounter(counter: RpcStub<Counter>, amount: number) {
+      incrementCounter(counter: RpcStub<Counter, BaseType>, amount: number) {
         return counter.increment(amount);
       }
     }
@@ -832,13 +831,13 @@ describe("capability-passing", () => {
         return new Counter(i);
       }
 
-      incrementCounter(counter: RpcStub<Counter>, amount: number) {
+      incrementCounter(counter: RpcStub<Counter, BaseType>, amount: number) {
         return counter.increment(amount);
       }
     }
 
     class BobTarget extends RpcTarget {
-      constructor(private alice: RpcStub<AliceTarget>) {
+      constructor(private alice: RpcStub<AliceTarget, BaseType>) {
         super();
       }
 
@@ -850,7 +849,7 @@ describe("capability-passing", () => {
         return this.alice.getCounter(i);
       }
 
-      incrementCounter(counter: RpcStub<Counter>, amount: number) {
+      incrementCounter(counter: RpcStub<Counter, BaseType>, amount: number) {
         return this.alice.incrementCounter(counter, amount);
       }
     }
@@ -1128,7 +1127,7 @@ describe("stub disposal over RPC", () => {
     }
 
     class MainTarget extends RpcTarget {
-      useDisposableTarget(stub: RpcStub<DisposableTarget>) {
+      useDisposableTarget(stub: RpcStub<DisposableTarget, BaseType>) {
         return stub.getValue();
       }
     }
@@ -1167,7 +1166,7 @@ describe("stub disposal over RPC", () => {
     }
 
     class MainTarget extends RpcTarget {
-      useDisposableTarget(stub: RpcStub<DisposableTarget>) {
+      useDisposableTarget(stub: RpcStub<DisposableTarget, BaseType>) {
         return stub.getValue();
       }
     }

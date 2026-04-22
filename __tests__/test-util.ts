@@ -4,7 +4,7 @@
 
 // Common RPC interfaces / implementations used in several tests.
 
-import { RpcStub, RpcTarget } from '../src/index.js';
+import { RpcStub, RpcTarget, BaseType } from '../src/index.js';
 
 export class Counter extends RpcTarget {
   constructor(private i: number = 0) {
@@ -31,11 +31,11 @@ export class TestTarget extends RpcTarget {
     return i * i;
   }
 
-  callSquare(self: RpcStub<TestTarget>, i: number) {
+  callSquare(self: RpcStub<TestTarget, BaseType>, i: number) {
     return { result: self.square(i) };
   }
 
-  async callFunction(func: RpcStub<(i: number) => Promise<number>>, i: number) {
+  async callFunction(func: RpcStub<(i: number) => Promise<number>, BaseType>, i: number) {
     return { result: await func(i) };
   }
 
@@ -47,7 +47,7 @@ export class TestTarget extends RpcTarget {
     return new Counter(i);
   }
 
-  incrementCounter(c: RpcStub<Counter>, i: number = 1) {
+  incrementCounter(c: RpcStub<Counter, BaseType>, i: number = 1) {
     return c.increment(i);
   }
 
