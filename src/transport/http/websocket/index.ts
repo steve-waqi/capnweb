@@ -6,7 +6,7 @@
 
 import { RpcSession as RpcSessionImpl, RpcSessionOptions } from "../../../rpc.js";
 import type { RpcSerializer, RpcTransport } from "../../../serializer.js";
-import { defaultRpcSerializer } from "../../../default-serializer.js";
+import { defaultRpcSerializer } from "../../default/index.js";
 import type { BaseType } from "../../../types.js";
 import type { RpcCompatible } from "../../../index.js";
 import type { SupportedTypes, RpcStub } from "./types.js";

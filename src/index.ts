@@ -6,7 +6,7 @@ import { RpcTarget as RpcTargetImpl, RpcStub as RpcStubImpl, RpcPromise as RpcPr
 import { serialize, deserialize } from "./serialize.js";
 import { RpcSession as RpcSessionImpl, RpcSessionOptions } from "./rpc.js";
 import type { RpcTransport, RpcSerializer } from "./serializer.js";
-import { defaultRpcSerializer } from "./default-serializer.js";
+import { defaultRpcSerializer } from "./transport/default/index.js";
 import { BaseType, RpcTargetBranded, RpcCompatible, Stub, Stubify, __RPC_TARGET_BRAND } from "./types.js";
 import { forceInitMap } from "./map.js";
 import { forceInitStreams } from "./streams.js";

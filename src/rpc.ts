@@ -6,8 +6,8 @@ import { StubHook, RpcPayload, RpcStub, PropertyPath, PayloadStubHook, ErrorStub
 import { ExportId, ImportId, Exporter, Importer, serialize } from "./serialize.js";
 import type { BaseType } from "./types.js";
 import type { EncodedExpression } from "./serialize.js";
+import { defaultMessageSize } from "./transport/default/message-size.js";
 import {
-  defaultMessageSize,
   type OutgoingExpression,
   type OutgoingRpcMessage,
   type RpcSerializer,

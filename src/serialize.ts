@@ -71,16 +71,6 @@ export type EncodedExpression =
   | ["pipeline", number, (string | number)[], EncodedValue[]]
   | ["remap", number, (string | number)[], (["import", number] | ["export", number])[], readonly EncodedExpression[]];
 
-export type EncodedMessage =
-  | ["push", EncodedExpression]
-  | ["stream", EncodedExpression]
-  | ["pipe"]
-  | ["pull", number]
-  | ["resolve", number, EncodedValue]
-  | ["reject", number, EncodedValue]
-  | ["release", number, number]
-  | ["abort", EncodedValue];
-
 // =======================================================================================
 
 export interface Exporter {

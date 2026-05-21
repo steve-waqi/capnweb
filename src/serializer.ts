@@ -67,7 +67,7 @@ export type IncomingRpcMessage =
 // Owns the entire wire format: the envelope shape, the expression shape inside push/stream,
 // and the value devaluation itself. Stubs, promises, and streams that appear in values MUST
 // go through `exporter` (outgoing) and `importer` (incoming) -- these allocate IDs and track
-// refcounts. See default-serializer.ts for the reference implementation.
+// refcounts. See transport/default/serializer.ts for the reference implementation.
 //
 // `SupportedTypes` is a phantom type parameter that drives the compile-time
 // `RpcCompatible<T, SupportedTypes>` check. It is the set of leaf values this serializer can
@@ -114,14 +114,4 @@ export interface RpcTransport<Message, SupportedTypes> {
   abort?(reason: any): void;
 
   readonly serializer: RpcSerializer<Message, SupportedTypes>;
-}
-
-// Fallback `sizeOf` used when a serializer doesn't provide its own. Handles strings (UTF-16
-// length) and typed arrays (byteLength). Unrecognized message types report 0.
-export function defaultMessageSize(message: unknown): number {
-  if (typeof message === "string") return message.length;
-  if (message != null && typeof (message as { byteLength?: unknown }).byteLength === "number") {
-    return (message as { byteLength: number }).byteLength;
-  }
-  return 0;
 }

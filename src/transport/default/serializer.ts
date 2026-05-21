@@ -4,21 +4,20 @@
 
 // Reference implementation of RpcSerializer and the wire format the built-in transports use.
 // Every tagged-array literal (["push", ...], ["pipeline", ...], ["remap", ...], etc.) and
-// every JSON.stringify/parse call in Cap'n Web lives in this file; rpc.ts no longer knows
-// about them. Custom serializers can import Devaluator/Evaluator from ./serialize.js to
-// keep the value-level encoding and swap only the framing.
+// every JSON.stringify/parse call in Cap'n Web lives in this module.
 
-import { Devaluator, Evaluator, type Exporter, type Importer } from "./serialize.js";
-import type { RpcPayload } from "./core.js";
-import {
-  defaultMessageSize,
-  type IncomingRpcMessage,
-  type OutgoingExpression,
-  type OutgoingRpcMessage,
-  type RpcSerializer,
-} from "./serializer.js";
-import type { EncodedMessage, EncodedExpression, EncodedValue, EncodedObject } from "./serialize.js";
-import type { BaseType } from "./types.js";
+import { Devaluator, Evaluator, type Exporter, type Importer } from "../../serialize.js";
+import type { RpcPayload } from "../../core.js";
+import type {
+  IncomingRpcMessage,
+  OutgoingExpression,
+  OutgoingRpcMessage,
+  RpcSerializer,
+} from "../../serializer.js";
+import type { EncodedExpression } from "../../serialize.js";
+import type { BaseType } from "../../types.js";
+import type { EncodedMessage } from "./types.js";
+import { defaultMessageSize } from "./message-size.js";
 
 function encodeExpression(expr: OutgoingExpression, exporter: Exporter): EncodedExpression {
   switch (expr.kind) {
