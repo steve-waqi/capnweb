@@ -302,7 +302,7 @@ class RpcSessionImpl<M, S> implements Importer, Exporter {
   private reverseExports: Map<StubHook, ExportId> = new Map();
   private imports: Array<ImportTableEntry<M, S>> = [];
   private abortReason?: any;
-  private cancelReadLoop: (error: any) => void;
+  private cancelReadLoop?: (error: any) => void;
   private serializer: RpcSerializer<M, S>;
 
   // We assign positive numbers to imports we initiate, and negative numbers to exports we
@@ -330,11 +330,7 @@ class RpcSessionImpl<M, S> implements Importer, Exporter {
     // Import zero is the other side's bootstrap object.
     this.imports.push(new ImportTableEntry<M, S>(this, 0, false));
 
-    let rejectFunc: (error: any) => void;;
-    let abortPromise = new Promise<never>((resolve, reject) => { rejectFunc = reject; });
-    this.cancelReadLoop = rejectFunc!;
-
-    this.readLoop(abortPromise).catch(err => this.abort(err));
+    this.readLoop().catch(err => this.abort(err));
   }
 
   // Should only be called once immediately after construction.
@@ -637,7 +633,8 @@ class RpcSessionImpl<M, S> implements Importer, Exporter {
     // Don't double-abort.
     if (this.abortReason !== undefined) return;
 
-    this.cancelReadLoop(error);
+    this.cancelReadLoop?.(error);
+    this.cancelReadLoop = undefined;
 
     if (trySendAbortMessage) {
       try {
@@ -686,9 +683,21 @@ class RpcSessionImpl<M, S> implements Importer, Exporter {
     }
   }
 
-  private async readLoop(abortPromise: Promise<never>) {
+  private async readLoop() {
     while (!this.abortReason) {
-      let wire = await Promise.race([this.transport.receive(), abortPromise]);
+      // Each receive needs its own abort promise so Promise.race() doesn't retain old reads.
+      let readCanceled = Promise.withResolvers<never>();
+      this.cancelReadLoop = readCanceled.reject;
+
+      let wire: M;
+      try {
+        wire = await Promise.race([this.transport.receive(), readCanceled.promise]);
+      } finally {
+        if (this.cancelReadLoop === readCanceled.reject) {
+          this.cancelReadLoop = undefined;
+        }
+      }
+
       if (this.abortReason) break;  // check again before processing
 
       let msg = this.serializer.deserialize(wire, this);
