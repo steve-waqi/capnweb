@@ -6,8 +6,8 @@
 import { expect, it, describe } from "vitest";
 import { RpcStub as NativeRpcStub, RpcTarget as NativeRpcTarget, env, DurableObject } from "cloudflare:workers";
 import { RpcStub, RpcTarget } from "../src/index-workers.js";
-import { newHttpBatchRpcSession } from "../src/http/batch/index.js";
-import { newWebSocketRpcSession } from "../src/http/websocket/index.js";
+import { newHttpBatchRpcSession } from "../src/transport/http/batch/index.js";
+import { newWebSocketRpcSession } from "../src/transport/http/websocket/index.js";
 import { Counter, TestTarget } from "./test-util.js";
 
 class JsCounter extends RpcTarget {

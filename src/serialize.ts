@@ -2,10 +2,84 @@
 // Licensed under the MIT license found in the LICENSE.txt file or at:
 //     https://opensource.org/license/mit
 
-import { StubHook, RpcPayload, typeForRpc, RpcStub, RpcPromise, LocatedPromise, RpcTarget, unwrapStubAndPath, streamImpl, PromiseStubHook, PayloadStubHook } from "./core.js";
+import { StubHook, RpcPayload, typeForRpc, RpcStub, RpcPromise, LocatedPromise, RpcTarget, unwrapStubAndPath, streamImpl, PromiseStubHook, PayloadStubHook, PropertyPath } from "./core.js";
 
 export type ImportId = number;
 export type ExportId = number;
+
+export interface EncodedObject {
+  [key: string]: EncodedValue;
+}
+
+export interface EncodedRequestInit {
+  method?: string;
+  headers?: [string, string][];
+  body?: EncodedValue;
+  duplex?: string;
+  cache?: string;
+  redirect?: string;
+  integrity?: string;
+  mode?: string;
+  credentials?: string;
+  referrer?: string;
+  referrerPolicy?: string;
+  keepalive?: boolean;
+  cf?: unknown;
+  encodeResponseBody?: string;
+  signal?: EncodedValue;
+}
+
+export interface EncodedResponseInit {
+  status?: number;
+  statusText?: string;
+  headers?: [string, string][];
+  cf?: unknown;
+  encodeBody?: string;
+  webSocket?: EncodedValue;
+}
+
+export type EncodedValue =
+  | null
+  | boolean
+  | number
+  | string
+  | EncodedObject
+  | [EncodedValue[]]
+  | ["undefined"]
+  | ["inf"]
+  | ["-inf"]
+  | ["nan"]
+  | ["bigint", string]
+  | ["date", number]
+  | ["bytes", string]
+  | ["headers", [string, string][]]
+  | ["request", string, EncodedRequestInit]
+  | ["response", EncodedValue, EncodedResponseInit]
+  | ["error", string, string]
+  | ["error", string, string, string]
+  | ["import", number]
+  | ["export", number]
+  | ["promise", number]
+  | ["pipeline", number]
+  | ["pipeline", number, (string | number)[]]
+  | ["writable", number]
+  | ["readable", number];
+
+export type EncodedExpression =
+  | EncodedValue
+  | ["pipeline", number, (string | number)[]]
+  | ["pipeline", number, (string | number)[], EncodedValue[]]
+  | ["remap", number, (string | number)[], (["import", number] | ["export", number])[], readonly EncodedExpression[]];
+
+export type EncodedMessage =
+  | ["push", EncodedExpression]
+  | ["stream", EncodedExpression]
+  | ["pipe"]
+  | ["pull", number]
+  | ["resolve", number, EncodedValue]
+  | ["reject", number, EncodedValue]
+  | ["release", number, number]
+  | ["abort", EncodedValue];
 
 // =======================================================================================
 
@@ -68,8 +142,8 @@ export class Devaluator {
   //
   // Returns: The devaluated value, ready to be JSON-serialized.
   public static devaluate(
-      value: unknown, parent?: object, exporter: Exporter = NULL_EXPORTER, source?: RpcPayload)
-      : unknown {
+      value: any, parent?: object, exporter: Exporter = NULL_EXPORTER, source?: RpcPayload)
+      : EncodedValue {
     let devaluator = new Devaluator(exporter, source);
     try {
       return devaluator.devaluateImpl(value, parent, 0);
@@ -85,9 +159,23 @@ export class Devaluator {
     }
   }
 
+  // Like `devaluate`, but specifically for RPC call arguments (which are passed as an array).
+  // The wire format requires call arguments to be an `EncodedValue[]`, but `devaluate` escapes
+  // literal arrays by wrapping them in a one-element outer array (i.e. `[[...]]`). This helper
+  // undoes that wrapping so the caller doesn't have to hardcode the unwrap.
+  public static devaluateCallArgs(
+      value: any, exporter: Exporter = NULL_EXPORTER, source?: RpcPayload)
+      : EncodedValue[] {
+    let devalued = Devaluator.devaluate(value, undefined, exporter, source);
+    if (Array.isArray(devalued) && devalued.length === 1 && Array.isArray(devalued[0])) {
+      return devalued[0] as EncodedValue[];
+    }
+    return [];
+  }
+
   private exports?: Array<ExportId>;
 
-  private devaluateImpl(value: unknown, parent: object | undefined, depth: number): unknown {
+  private devaluateImpl(value: any, parent: object | undefined, depth: number): EncodedValue {
     if (depth >= 64) {
       throw new Error(
           "Serialization exceeded maximum allowed depth. (Does the message contain cycles?)");
@@ -116,24 +204,22 @@ export class Devaluator {
           }
         } else {
           // Supported directly by JSON.
-          return value;
+          return value as EncodedValue;
         }
 
       case "object": {
-        let object = <Record<string, unknown>>value;
-        let result: Record<string, unknown> = {};
-        for (let key in object) {
-          result[key] = this.devaluateImpl(object[key], object, depth + 1);
+        let result: EncodedObject = {};
+        for (let key in value) {
+          result[key] = this.devaluateImpl(value[key], value, depth + 1);
         }
         return result;
       }
 
       case "array": {
-        let array = <Array<unknown>>value;
-        let len = array.length;
-        let result = new Array(len);
+        let len = value.length;
+        let result: EncodedValue[] = new Array(len);
         for (let i = 0; i < len; i++) {
-          result[i] = this.devaluateImpl(array[i], array, depth + 1);
+          result[i] = this.devaluateImpl(value[i], value, depth + 1);
         }
         // Wrap literal arrays in an outer one-element array, to "escape" them.
         return [result];
@@ -172,7 +258,7 @@ export class Devaluator {
 
       case "request": {
         let req = <Request>value;
-        let init: Record<string, unknown> = {};
+        let init: EncodedRequestInit = {};
 
         // For many properties below, the official Fetch spec says they must always be present,
         // but some platforms don't support them. So, we check both whether the property exists,
@@ -265,7 +351,7 @@ export class Devaluator {
       case "response": {
         let resp = <Response>value;
         let body = this.devaluateImpl(resp.body, resp, depth + 1);
-        let init: Record<string, unknown> = {};
+        let init: EncodedResponseInit = {};
 
         if (resp.status !== 200) init.status = resp.status;
         if (resp.statusText) init.statusText = resp.statusText;
@@ -305,11 +391,10 @@ export class Devaluator {
           e = rewritten;
         }
 
-        let result = ["error", e.name, e.message];
         if (rewritten && rewritten.stack) {
-          result.push(rewritten.stack);
+          return ["error", e.name, e.message, rewritten.stack];
         }
-        return result;
+        return ["error", e.name, e.message];
       }
 
       case "undefined":
@@ -393,7 +478,7 @@ export class Devaluator {
     }
   }
 
-  private devaluateHook(type: "export" | "promise" | "writable", hook: StubHook): unknown {
+  private devaluateHook(type: "export" | "promise" | "writable", hook: StubHook): ["export" | "promise" | "writable", number] {
     if (!this.exports) this.exports = [];
     let exportId = type === "promise" ? this.exporter.exportPromise(hook)
                                       : this.exporter.exportStub(hook);
@@ -410,7 +495,7 @@ export class Devaluator {
  * session/message-level `RpcSerializer` extension point -- custom wire formats should
  * be plugged in through `RpcTransport.serializer`, not here.
  */
-export function serialize(value: unknown): string {
+export function serialize(value: any): string {
   return JSON.stringify(Devaluator.devaluate(value));
 }
 
@@ -468,7 +553,7 @@ export class Evaluator {
   private hooks: StubHook[] = [];
   private promises: LocatedPromise[] = [];
 
-  public evaluate(value: unknown): RpcPayload {
+  public evaluate(value: EncodedExpression): RpcPayload {
     let payload = RpcPayload.forEvaluate(this.hooks, this.promises);
     try {
       payload.value = this.evaluateImpl(value, payload, "value");
@@ -480,11 +565,11 @@ export class Evaluator {
   }
 
   // Evaluate the value without destroying it.
-  public evaluateCopy(value: unknown): RpcPayload {
+  public evaluateCopy(value: EncodedExpression): RpcPayload {
     return this.evaluate(structuredClone(value));
   }
 
-  private evaluateImpl(value: unknown, parent: object, property: string | number): unknown {
+  private evaluateImpl(value: EncodedExpression, parent: object, property: string | number): any {
     if (value instanceof Array) {
       if (value.length == 1 && value[0] instanceof Array) {
         // Escaped array. Evaluate the contents.
@@ -686,7 +771,7 @@ export class Evaluator {
 
           if (value.length == 3) {
             // Just referencing the path, not a call.
-            return addStub(hook.get(path));
+            return addStub(hook.get(path as PropertyPath));
           }
 
           // Third parameter, if given, is call arguments. The sender has identified a function
@@ -704,9 +789,9 @@ export class Evaluator {
 
           // We need a new evaluator for the args, to build a separate payload.
           let subEval = new Evaluator(this.importer);
-          args = subEval.evaluate([args]);
+          let parsedArgs = subEval.evaluate([args]);
 
-          return addStub(hook.call(path, args));
+          return addStub(hook.call(path as PropertyPath, parsedArgs));
         }
 
         case "remap": {
@@ -750,7 +835,7 @@ export class Evaluator {
 
           let instructions = value[4];
 
-          let resultHook = hook.map(path, captures, instructions);
+          let resultHook = hook.map(path as PropertyPath, captures, instructions as EncodedExpression[]);
 
           let promise = new RpcPromise(resultHook, []);
           this.promises.push({promise, parent, property});
@@ -808,7 +893,7 @@ export class Evaluator {
       }
       throw new TypeError(`unknown special value: ${JSON.stringify(value)}`);
     } else if (value instanceof Object) {
-      let result = <Record<string, unknown>>value;
+      let result = <EncodedObject>value;
       for (let key in result) {
         if (key in Object.prototype || key === "toJSON") {
           // Out of an abundance of caution, we will ignore properties that override properties
@@ -824,7 +909,7 @@ export class Evaluator {
           this.evaluateImpl(result[key], result, key);
           delete result[key];
         } else {
-          result[key] = this.evaluateImpl(result[key], result, key);
+          result[key] = this.evaluateImpl(result[key], result, key) as EncodedValue;
         }
       }
       return result;
@@ -841,7 +926,7 @@ export class Evaluator {
  * Like `serialize()`, this is a standalone helper for Cap'n Web's value-level wire
  * format and is independent of the session-level `RpcSerializer`.
  */
-export function deserialize(value: string): unknown {
+export function deserialize(value: string): any {
   let payload = new Evaluator(NULL_IMPORTER).evaluate(JSON.parse(value));
   payload.dispose();  // should be no-op but just in case
   return payload.value;

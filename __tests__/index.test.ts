@@ -4,10 +4,10 @@
 
 import { expect, it, describe, inject } from "vitest"
 import { deserialize, serialize, RpcSession, type RpcSessionOptions, RpcTransport, RpcTarget,
-         RpcStub, defaultRpcSerializer, BaseType} from "../src/index.js"
-import { newHttpBatchRpcSession } from "../src/http/batch/index.js"
-import { newWebSocketRpcSession } from "../src/http/websocket/index.js"
-import { newMessagePortRpcSession } from "../src/messageport/index.js"
+         RpcStub, defaultRpcSerializer, BaseType, Devaluator} from "../src/index.js"
+import { newHttpBatchRpcSession } from "../src/transport/http/batch/index.js"
+import { newWebSocketRpcSession } from "../src/transport/http/websocket/index.js"
+import { newMessagePortRpcSession } from "../src/transport/messageport/index.js"
 import { Counter, TestTarget } from "./test-util.js";
 
 let SERIALIZE_TEST_CASES: Record<string, unknown> = {
@@ -131,6 +131,14 @@ describe("simple serialization", () => {
     expect(() => deserialize('["error"]')).toThrowError(); // missing type and message
   })
 
+  it("throws errors for malformed RPC envelopes", () => {
+    const importer = {} as any;
+    expect(() => defaultRpcSerializer.deserialize('["abort"]', importer)).toThrowError('bad RPC message: ["abort"]');
+    expect(() => defaultRpcSerializer.deserialize('["push"]', importer)).toThrowError('bad RPC message: ["push"]');
+    expect(() => defaultRpcSerializer.deserialize('["resolve", 1]', importer)).toThrowError('bad RPC message: ["resolve",1]');
+    expect(() => defaultRpcSerializer.deserialize('["pull"]', importer)).toThrowError('bad RPC message: ["pull"]');
+  })
+
   it("can serialize large Uint8Array without stack overflow", () => {
     let bytes = new Uint8Array(200000);
     for (let i = 0; i < bytes.length; i++) {
@@ -170,6 +178,15 @@ describe("simple serialization", () => {
     let deserialized = deserialize(serialized) as Uint8Array;
     expect(deserialized).toBeInstanceOf(Uint8Array);
     expect(new Uint8Array(deserialized)).toStrictEqual(new Uint8Array(buf));
+  })
+
+  it("can encode call arguments and escape arrays via Devaluator.devaluateCallArgs", () => {
+    expect(Devaluator.devaluateCallArgs([1, 2, 3])).toStrictEqual([1, 2, 3]);
+    expect(Devaluator.devaluateCallArgs([1])).toStrictEqual([1]);
+    // The outer array represents the args list, inner arrays represent array values
+    expect(Devaluator.devaluateCallArgs([[1, 2]])).toStrictEqual([[[1, 2]]]);
+    // Non-array gracefully falls back to an empty array
+    expect(Devaluator.devaluateCallArgs("not array")).toStrictEqual([]);
   })
 });
 

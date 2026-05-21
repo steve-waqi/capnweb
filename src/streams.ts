@@ -5,6 +5,7 @@
 import {
   StubHook, RpcPayload, PropertyPath, ErrorStubHook, PayloadStubHook, PromiseStubHook, streamImpl
 } from "./core.js";
+import type { EncodedExpression, EncodedValue } from "./serialize.js";
 
 // =======================================================================================
 // WritableStreamStubHook - wraps a local WritableStream for export
@@ -70,7 +71,7 @@ class WritableStreamStubHook extends StubHook {
     }
   }
 
-  map(path: PropertyPath, captures: StubHook[], instructions: unknown[]): StubHook {
+  map(path: PropertyPath, captures: StubHook[], instructions: EncodedExpression[]): StubHook {
     // WritableStreams don't support map operations.
     for (let cap of captures) {
       cap.dispose();
@@ -317,7 +318,7 @@ function createWritableStreamFromHook(hook: StubHook): WritableStream {
 
   // If a previous write blocked waiting for the window to open, this resolver will unblock it.
   let windowResolve: (() => void) | undefined;
-  let windowReject: ((e: unknown) => void) | undefined;
+  let windowReject: ((e: EncodedValue) => void) | undefined;
 
   const disposeHook = () => {
     if (!hookDisposed) {
@@ -461,7 +462,7 @@ class ReadableStreamStubHook extends StubHook {
     return new ErrorStubHook(new Error("Cannot call methods on a ReadableStream stub"));
   }
 
-  map(path: PropertyPath, captures: StubHook[], instructions: unknown[]): StubHook {
+  map(path: PropertyPath, captures: StubHook[], instructions: EncodedExpression[]): StubHook {
     for (let cap of captures) {
       cap.dispose();
     }

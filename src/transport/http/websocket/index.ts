@@ -4,11 +4,11 @@
 
 /// <reference types="@cloudflare/workers-types" />
 
-import { RpcSession as RpcSessionImpl, RpcSessionOptions } from "../../rpc.js";
-import type { RpcSerializer, RpcTransport } from "../../serializer.js";
-import { defaultRpcSerializer } from "../../default-serializer.js";
-import type { BaseType } from "../../types.js";
-import type { RpcCompatible } from "../../index.js";
+import { RpcSession as RpcSessionImpl, RpcSessionOptions } from "../../../rpc.js";
+import type { RpcSerializer, RpcTransport } from "../../../serializer.js";
+import { defaultRpcSerializer } from "../../../default-serializer.js";
+import type { BaseType } from "../../../types.js";
+import type { RpcCompatible } from "../../../index.js";
 import type { SupportedTypes, RpcStub } from "./types.js";
 
 export type { RpcStub, RpcPromise, RpcSession, RpcSessionOptions, RpcTransport, RpcSerializer, SupportedTypes } from "./types.js";

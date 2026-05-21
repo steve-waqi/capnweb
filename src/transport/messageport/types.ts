@@ -2,7 +2,7 @@
 // Licensed under the MIT license found in the LICENSE.txt file or at:
 //     https://opensource.org/license/mit
 
-// Concrete type aliases for the built-in batch transport (string messages, BaseType supported).
+// Concrete type aliases for the built-in MessagePort transport (string messages, BaseType supported).
 
 import {
   BaseType,

@@ -8,9 +8,9 @@ export default defineConfig({
   entry: [
     'src/index.ts',
     'src/index-workers.ts',
-    'src/http/batch/index.ts',
-    'src/http/websocket/index.ts',
-    'src/messageport/index.ts',
+    'src/transport/http/batch/index.ts',
+    'src/transport/http/websocket/index.ts',
+    'src/transport/messageport/index.ts',
   ],
   format: ['esm', 'cjs'],
   external: ['cloudflare:workers'],

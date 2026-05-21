@@ -21,20 +21,20 @@
         "default": "./dist/index.cjs"
       }
     },
-    "./http/batch": {
-      "types": "./dist/http/batch/index.d.ts",
-      "import": "./dist/http/batch/index.js",
-      "require": "./dist/http/batch/index.cjs"
+    "./transport/http/batch": {
+      "types": "./dist/transport/http/batch/index.d.ts",
+      "import": "./dist/transport/http/batch/index.js",
+      "require": "./dist/transport/http/batch/index.cjs"
     },
-    "./http/websocket": {
-      "types": "./dist/http/websocket/index.d.ts",
-      "import": "./dist/http/websocket/index.js",
-      "require": "./dist/http/websocket/index.cjs"
+    "./transport/http/websocket": {
+      "types": "./dist/transport/http/websocket/index.d.ts",
+      "import": "./dist/transport/http/websocket/index.js",
+      "require": "./dist/transport/http/websocket/index.cjs"
     },
-    "./messageport": {
-      "types": "./dist/messageport/index.d.ts",
-      "import": "./dist/messageport/index.js",
-      "require": "./dist/messageport/index.cjs"
+    "./transport/messageport": {
+      "types": "./dist/transport/messageport/index.d.ts",
+      "import": "./dist/transport/messageport/index.js",
+      "require": "./dist/transport/messageport/index.cjs"
     }
   },
   "type": "module",

@@ -7,8 +7,8 @@ import {
   type RpcCompatible,
   type RpcTransport,
 } from "../src/index.js"
-import { newHttpBatchRpcSession } from "../src/http/batch/index.js"
-import { newWebSocketRpcSession } from "../src/http/websocket/index.js"
+import { newHttpBatchRpcSession } from "../src/transport/http/batch/index.js"
+import { newWebSocketRpcSession } from "../src/transport/http/websocket/index.js"
 import { expectAssignable, expectType, type Equal, type Expect } from "./helpers.js"
 
 type Formatter = (value: number) => Promise<string>

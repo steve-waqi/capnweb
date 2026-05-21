@@ -5,6 +5,7 @@
 import { StubHook, RpcPayload, RpcStub, PropertyPath, PayloadStubHook, ErrorStubHook, RpcTarget, unwrapStubAndPath, streamImpl } from "./core.js";
 import { ExportId, ImportId, Exporter, Importer, serialize } from "./serialize.js";
 import type { BaseType } from "./types.js";
+import type { EncodedExpression } from "./serialize.js";
 import {
   defaultMessageSize,
   type OutgoingExpression,
@@ -192,7 +193,7 @@ class RpcImportHook<M, S> extends StubHook {
     }
   }
 
-  map(path: PropertyPath, captures: StubHook[], instructions: unknown[]): StubHook {
+  map(path: PropertyPath, captures: StubHook[], instructions: EncodedExpression[]): StubHook {
     let entry: ImportTableEntry<M, S>;
     try {
       entry = this.getEntry();
@@ -602,7 +603,7 @@ class RpcSessionImpl<M, S> implements Importer, Exporter {
     return { promise, size };
   }
 
-  sendMap(id: ImportId, path: PropertyPath, captures: StubHook[], instructions: unknown[])
+  sendMap(id: ImportId, path: PropertyPath, captures: StubHook[], instructions: EncodedExpression[])
       : RpcImportHook<M, S> {
     if (this.abortReason) {
       for (let cap of captures) {

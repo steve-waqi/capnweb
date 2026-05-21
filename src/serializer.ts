@@ -3,8 +3,7 @@
 //     https://opensource.org/license/mit
 
 import type { PropertyPath, RpcPayload, StubHook } from "./core.js";
-import type { Exporter, Importer } from "./serialize.js";
-import type { BaseType } from "./types.js";
+import type { Exporter, Importer, EncodedExpression } from "./serialize.js";
 
 // =======================================================================================
 // Protocol messages
@@ -18,7 +17,7 @@ import type { BaseType } from "./types.js";
 // is a recorded .map() callback. `source` / `args` are the owning RpcPayloads -- required
 // so the serializer can walk stubs correctly (stub ownership follows the payload).
 export type OutgoingExpression =
-  | { readonly kind: "value"; readonly value: unknown; readonly source: RpcPayload }
+  | { readonly kind: "value"; readonly value: any; readonly source: RpcPayload }
   | {
       readonly kind: "call";
       readonly importId: number;
@@ -30,7 +29,7 @@ export type OutgoingExpression =
       readonly importId: number;
       readonly path: PropertyPath;
       readonly captures: readonly StubHook[];
-      readonly instructions: readonly unknown[];
+      readonly instructions: readonly EncodedExpression[];
     };
 
 // Every message the session can emit. IDs use the sender's perspective: `importId` is an
@@ -43,12 +42,12 @@ export type OutgoingRpcMessage =
   | {
       readonly kind: "resolve";
       readonly exportId: number;
-      readonly value: unknown;
+      readonly value: any;
       readonly source: RpcPayload;
     }
-  | { readonly kind: "reject"; readonly exportId: number; readonly error: unknown }
+  | { readonly kind: "reject"; readonly exportId: number; readonly error: any }
   | { readonly kind: "release"; readonly importId: number; readonly refcount: number }
-  | { readonly kind: "abort"; readonly reason: unknown };
+  | { readonly kind: "abort"; readonly reason: any };
 
 // The parsed shape of a received message. Value-bearing kinds already carry a hydrated
 // RpcPayload -- the serializer has resolved any `call` / `map` expressions against the

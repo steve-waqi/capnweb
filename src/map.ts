@@ -4,6 +4,7 @@
 
 import { StubHook, PropertyPath, RpcPayload, RpcStub, RpcPromise, withCallInterceptor, ErrorStubHook, mapImpl, PayloadStubHook, unwrapStubAndPath, unwrapStubNoProperties } from "./core.js";
 import { Devaluator, Exporter, Importer, ExportId, ImportId, Evaluator } from "./serialize.js";
+import type { EncodedExpression, EncodedValue } from "./serialize.js";
 
 let currentMapBuilder: MapBuilder | undefined;
 
@@ -11,7 +12,7 @@ let currentMapBuilder: MapBuilder | undefined;
 // describes a subset of the overall RPC protocol.
 export type MapInstruction =
     | ["pipeline", number, PropertyPath]
-    | ["pipeline", number, PropertyPath, unknown]
+    | ["pipeline", number, PropertyPath, EncodedValue[]]
     | ["remap", number, PropertyPath, ["import", number][], MapInstruction[]]
 
 class MapBuilder implements Exporter {
@@ -51,7 +52,7 @@ class MapBuilder implements Exporter {
   }
 
   makeOutput(result: RpcPayload): StubHook {
-    let devalued: unknown;
+    let devalued: EncodedValue;
     try {
       devalued = Devaluator.devaluate(result.value, undefined, this, result);
     } finally {
@@ -75,13 +76,10 @@ class MapBuilder implements Exporter {
   }
 
   pushCall(hook: StubHook, path: PropertyPath, params: RpcPayload): StubHook {
-    let devalued = Devaluator.devaluate(params.value, undefined, this, params);
-    // HACK: Since the args is an array, devaluator will wrap in a second array. Need to unwrap.
-    // TODO: Clean this up somehow.
-    devalued = (<Array<unknown>>devalued)[0];
+    let args = Devaluator.devaluateCallArgs(params.value, this, params);
 
     let subject = this.capture(hook.dup());
-    this.instructions.push(["pipeline", subject, path, devalued]);
+    this.instructions.push(["pipeline", subject, path, args]);
     return new MapVariableHook(this, this.instructions.length);
   }
 
@@ -154,7 +152,7 @@ class MapBuilder implements Exporter {
   }
 };
 
-mapImpl.sendMap = (hook: StubHook, path: PropertyPath, func: (promise: RpcPromise) => unknown) => {
+mapImpl.sendMap = (hook: StubHook, path: PropertyPath, func: (promise: RpcPromise) => any) => {
   let builder = new MapBuilder(hook, path);
   let result: RpcPayload;
   try {
@@ -213,7 +211,7 @@ class MapVariableHook extends StubHook {
     throwMapperBuilderUseError();
   }
 
-  map(path: PropertyPath, captures: StubHook[], instructions: unknown[]): StubHook {
+  map(path: PropertyPath, captures: StubHook[], instructions: EncodedExpression[]): StubHook {
     // Can't be called; all map()s are intercepted.
     throwMapperBuilderUseError();
   }
@@ -247,7 +245,7 @@ class MapApplicator implements Importer {
     }
   }
 
-  apply(instructions: unknown[]): RpcPayload {
+  apply(instructions: EncodedExpression[]): RpcPayload {
     try {
       if (instructions.length < 1) {
         throw new Error("Invalid empty mapper function.");
@@ -298,8 +296,8 @@ class MapApplicator implements Importer {
   }
 }
 
-function applyMapToElement(input: unknown, parent: object | undefined, owner: RpcPayload | null,
-                           captures: StubHook[], instructions: unknown[]): RpcPayload {
+function applyMapToElement(input: any, parent: object | undefined, owner: RpcPayload | null,
+                           captures: StubHook[], instructions: EncodedExpression[]): RpcPayload {
   // TODO(perf): I wonder if we could use .fromAppParams() instead of .deepCopyFrom()? It
   //   maybe wouldn't correctly handle the case of RpcTargets in the input, so we need a variant
   //   which takes an `owner`, which does add some complexity.
@@ -312,8 +310,8 @@ function applyMapToElement(input: unknown, parent: object | undefined, owner: Rp
   }
 }
 
-mapImpl.applyMap = (input: unknown, parent: object | undefined, owner: RpcPayload | null,
-                    captures: StubHook[], instructions: unknown[]) => {
+mapImpl.applyMap = (input: any, parent: object | undefined, owner: RpcPayload | null,
+                    captures: StubHook[], instructions: EncodedExpression[]) => {
   try {
     let result: RpcPayload;
     if (input instanceof RpcPromise) {

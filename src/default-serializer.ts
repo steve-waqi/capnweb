@@ -17,9 +17,10 @@ import {
   type OutgoingRpcMessage,
   type RpcSerializer,
 } from "./serializer.js";
+import type { EncodedMessage, EncodedExpression, EncodedValue, EncodedObject } from "./serialize.js";
 import type { BaseType } from "./types.js";
 
-function encodeExpression(expr: OutgoingExpression, exporter: Exporter): unknown {
+function encodeExpression(expr: OutgoingExpression, exporter: Exporter): EncodedExpression {
   switch (expr.kind) {
     case "value":
       return Devaluator.devaluate(expr.value, undefined, exporter, expr.source);
@@ -27,15 +28,11 @@ function encodeExpression(expr: OutgoingExpression, exporter: Exporter): unknown
     case "call": {
       // ["pipeline", importId, path] for a property get, or ["pipeline", importId, path,
       // devaluedArgs] for a method call.
-      let wire: unknown[] = ["pipeline", expr.importId, expr.path];
       if (expr.args) {
-        let devalued = Devaluator.devaluate(expr.args.value, undefined, exporter, expr.args);
-        // HACK: Since args is an array, devaluator wraps it in a second array. Unwrap it
-        // so the wire has ["pipeline", id, path, args] not ["pipeline", id, path, [args]].
-        // TODO: Clean this up somehow.
-        wire.push((devalued as unknown[])[0]);
+        let args = Devaluator.devaluateCallArgs(expr.args.value, exporter, expr.args);
+        return ["pipeline", expr.importId, expr.path, args];
       }
-      return wire;
+      return ["pipeline", expr.importId, expr.path];
     }
 
     case "map": {
@@ -43,15 +40,19 @@ function encodeExpression(expr: OutgoingExpression, exporter: Exporter): unknown
       // when the peer already has them, or ["export", id] when we export them fresh.
       let devaluedCaptures = expr.captures.map(hook => {
         let importId = exporter.getImport(hook);
-        if (importId !== undefined) return ["import", importId];
-        return ["export", exporter.exportStub(hook)];
+        if (importId !== undefined) {
+          const res: ["import", number] = ["import", importId];
+          return res;
+        }
+        const res: ["export", number] = ["export", exporter.exportStub(hook)];
+        return res;
       });
       return ["remap", expr.importId, expr.path, devaluedCaptures, expr.instructions];
     }
   }
 }
 
-function encodeMessage(msg: OutgoingRpcMessage, exporter: Exporter): unknown {
+function encodeMessage(msg: OutgoingRpcMessage, exporter: Exporter): EncodedMessage {
   switch (msg.kind) {
     case "push":
       return ["push", encodeExpression(msg.expression, exporter)];
@@ -62,8 +63,7 @@ function encodeMessage(msg: OutgoingRpcMessage, exporter: Exporter): unknown {
     case "pull":
       return ["pull", msg.importId];
     case "resolve":
-      return ["resolve", msg.exportId,
-          Devaluator.devaluate(msg.value, undefined, exporter, msg.source)];
+      return ["resolve", msg.exportId, Devaluator.devaluate(msg.value, undefined, exporter, msg.source)];
     case "reject":
       return ["reject", msg.exportId, Devaluator.devaluate(msg.error, undefined, exporter)];
     case "release":
@@ -75,11 +75,11 @@ function encodeMessage(msg: OutgoingRpcMessage, exporter: Exporter): unknown {
 
 // Each evaluator instance keeps its own hooks/promises arrays, so we cannot share one
 // across messages.
-function evaluatePayload(wire: unknown, importer: Importer): RpcPayload {
+function evaluatePayload(wire: EncodedExpression, importer: Importer): RpcPayload {
   return new Evaluator(importer).evaluate(wire);
 }
 
-function decodeMessage(raw: unknown, importer: Importer): IncomingRpcMessage {
+function decodeMessage(raw: any, importer: Importer): IncomingRpcMessage {
   if (!(raw instanceof Array) || raw.length < 1) {
     throw new Error(`bad RPC message: ${JSON.stringify(raw)}`);
   }
@@ -127,7 +127,10 @@ function decodeMessage(raw: unknown, importer: Importer): IncomingRpcMessage {
       break;
 
     case "abort":
-      return { kind: "abort", payload: evaluatePayload(raw[1], importer) };
+      if (raw.length > 1) {
+        return { kind: "abort", payload: evaluatePayload(raw[1], importer) };
+      }
+      break;
   }
 
   throw new Error(`bad RPC message: ${JSON.stringify(raw)}`);

@@ -15,8 +15,8 @@
 import { WebSocketServer, AddressInfo } from 'ws'
 import type { TestProject } from 'vitest/node'
 import * as url from 'url'
-import { newWebSocketRpcSession } from '../src/http/websocket/index.js';
-import { nodeHttpBatchRpcResponse } from '../src/http/batch/index.js';
+import { newWebSocketRpcSession } from '../src/transport/http/websocket/index.js';
+import { nodeHttpBatchRpcResponse } from '../src/transport/http/batch/index.js';
 import { TestTarget } from './test-util.js';
 import http from "node:http";
 
